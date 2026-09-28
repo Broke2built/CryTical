@@ -1,0 +1,476 @@
+{
+  "$comment": "Source of truth for every skill the agent can learn from. `npm run skills:sync` reads this file. Git sources with a permissive license and commit:true are vendored into skills/vendor/ and committed; everything else is fetched into skills/external/ (gitignored) on each install.",
+  "categories": {
+    "gas": "Gas sponsorship, paymasters, relayers, bundlers, smart accounts",
+    "wallets": "Wallet infrastructure (embedded, server, agent, MPC)",
+    "agents": "Agent-native platforms: token launches, fee earning, social, x402 payments",
+    "defi": "Swaps, bridges, lending, prediction markets, data",
+    "chains": "Chain-level docs (mostly L2s where gas is cheap or sponsored)",
+    "reference": "Broad multi-protocol skill collections"
+  },
+  "git": [
+    {
+      "id": "coinbase-agentic-wallet",
+      "repo": "coinbase/agentic-wallet-skills",
+      "license": "MIT",
+      "category": "wallets",
+      "paths": [
+        "skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "base",
+      "repo": "base/skills",
+      "license": "MIT",
+      "category": "chains",
+      "paths": [
+        "skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "alchemy",
+      "repo": "alchemyplatform/skills",
+      "license": "MIT",
+      "category": "gas",
+      "paths": [
+        "skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "circle",
+      "repo": "circlefin/skills",
+      "license": "Apache-2.0",
+      "category": "wallets",
+      "paths": [
+        "plugins/circle/skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "candide",
+      "repo": "candidelabs/skills",
+      "license": "MIT",
+      "category": "gas",
+      "paths": [
+        "skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "kora",
+      "repo": "solana-foundation/kora",
+      "license": "MIT",
+      "category": "gas",
+      "paths": [
+        ".claude/skills/kora-client",
+        ".claude/skills/kora-operator"
+      ],
+      "commit": true
+    },
+    {
+      "id": "zora-cli",
+      "repo": "ourzora/zora-protocol",
+      "license": "MIT",
+      "category": "agents",
+      "paths": [
+        "packages/cli"
+      ],
+      "commit": true
+    },
+    {
+      "id": "bankr-claude-plugins",
+      "repo": "bankrbot/claude-plugins",
+      "license": "MIT",
+      "category": "agents",
+      "paths": [
+        "."
+      ],
+      "commit": true
+    },
+    {
+      "id": "uniswap",
+      "repo": "Uniswap/uniswap-ai",
+      "license": "MIT",
+      "category": "defi",
+      "paths": [
+        "packages/plugins"
+      ],
+      "commit": true
+    },
+    {
+      "id": "aave",
+      "repo": "aave/skills",
+      "license": "MIT",
+      "category": "defi",
+      "paths": [
+        "plugins"
+      ],
+      "commit": true
+    },
+    {
+      "id": "openfort",
+      "repo": "openfort-xyz/agent-skills",
+      "license": "MIT",
+      "category": "wallets",
+      "paths": [
+        "skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "helius",
+      "repo": "helius-labs/core-ai",
+      "license": "MIT",
+      "category": "chains",
+      "paths": [
+        "helius-skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "cryptoskills",
+      "repo": "naruto11eth/cryptoskills",
+      "license": "Apache-2.0",
+      "category": "reference",
+      "paths": [
+        "skills"
+      ],
+      "commit": true
+    },
+    {
+      "id": "bankr-skills",
+      "repo": "BankrBot/skills",
+      "license": "unspecified",
+      "category": "agents",
+      "paths": [
+        "."
+      ],
+      "commit": false
+    },
+    {
+      "id": "across",
+      "repo": "across-protocol/skills",
+      "license": "unspecified",
+      "category": "defi",
+      "paths": [
+        "skills"
+      ],
+      "commit": false
+    }
+  ],
+  "hosted": [
+    {
+      "id": "safe",
+      "category": "gas",
+      "note": "Safe public relayer (free daily quota per chain), Safe{Core} smart accounts",
+      "llms": "https://docs.safe.global/llms.txt"
+    },
+    {
+      "id": "gelato",
+      "category": "gas",
+      "note": "Gelato gasless relay (@gelatocloud/gasless), 1Balance sponsorship (docs.gelato.cloud was returning Vercel DEPLOYMENT_NOT_FOUND on 2026-09-28; re-check)",
+      "skill": "https://docs.gelato.cloud/skill.md",
+      "llms": "https://docs.gelato.cloud/llms.txt"
+    },
+    {
+      "id": "pimlico",
+      "category": "gas",
+      "note": "ERC-4337 bundler + verifying/ERC-20 paymasters, permissionless.js",
+      "llms": "https://docs.pimlico.io/llms.txt"
+    },
+    {
+      "id": "zerodev",
+      "category": "gas",
+      "note": "Kernel smart accounts, UltraRelay, session keys, gas sponsorship",
+      "llms": "https://docs.zerodev.app/llms.txt"
+    },
+    {
+      "id": "biconomy",
+      "category": "gas",
+      "note": "Nexus accounts, MEE orchestration, sponsored gas",
+      "skill": "https://docs.biconomy.io/skill.md",
+      "llms": "https://docs.biconomy.io/llms.txt"
+    },
+    {
+      "id": "alchemy-docs",
+      "category": "gas",
+      "note": "Gas Manager policies, Account Kit, bundler",
+      "llms": "https://www.alchemy.com/docs/llms.txt"
+    },
+    {
+      "id": "coinbase-cdp",
+      "category": "gas",
+      "note": "CDP Paymaster (Base gas credits), Server Wallets, Onramp, x402 facilitator",
+      "skill": "https://docs.cdp.coinbase.com/skill.md",
+      "llms": "https://docs.cdp.coinbase.com/llms.txt"
+    },
+    {
+      "id": "candide-docs",
+      "category": "gas",
+      "note": "Candide bundler + paymaster, Safe-based accounts",
+      "llms": "https://docs.candide.dev/llms.txt"
+    },
+    {
+      "id": "etherspot",
+      "category": "gas",
+      "note": "Skandha bundler, Arka paymaster",
+      "llms": "https://etherspot.fyi/llms.txt"
+    },
+    {
+      "id": "particle",
+      "category": "gas",
+      "note": "Universal accounts, chain abstraction, paymaster",
+      "skill": "https://docs.particle.network/skill.md",
+      "llms": "https://docs.particle.network/llms.txt"
+    },
+    {
+      "id": "thirdweb",
+      "category": "gas",
+      "note": "Engine, sponsored transactions, account abstraction",
+      "llms": "https://portal.thirdweb.com/llms.txt"
+    },
+    {
+      "id": "relay",
+      "category": "gas",
+      "note": "Relay bridge/swap with gas-sponsored execution",
+      "skill": "https://docs.relay.link/skill.md",
+      "llms": "https://docs.relay.link/llms.txt"
+    },
+    {
+      "id": "abstract",
+      "category": "gas",
+      "note": "Abstract chain: native account abstraction + paymasters",
+      "skill": "https://docs.abs.xyz/skill.md",
+      "llms": "https://docs.abs.xyz/llms.txt"
+    },
+    {
+      "id": "circle-docs",
+      "category": "wallets",
+      "note": "Circle Paymaster (pay gas in USDC), Programmable Wallets, CCTP",
+      "skill": "https://developers.circle.com/skill.md",
+      "llms": "https://developers.circle.com/llms.txt"
+    },
+    {
+      "id": "privy",
+      "category": "wallets",
+      "skill": "https://docs.privy.io/skill.md",
+      "llms": "https://docs.privy.io/llms.txt"
+    },
+    {
+      "id": "turnkey",
+      "category": "wallets",
+      "skill": "https://docs.turnkey.com/skill.md",
+      "llms": "https://docs.turnkey.com/llms.txt"
+    },
+    {
+      "id": "crossmint",
+      "category": "wallets",
+      "skill": "https://docs.crossmint.com/skill.md",
+      "llms": "https://docs.crossmint.com/llms.txt"
+    },
+    {
+      "id": "dynamic",
+      "category": "wallets",
+      "skill": "https://docs.dynamic.xyz/skill.md",
+      "llms": "https://docs.dynamic.xyz/llms.txt"
+    },
+    {
+      "id": "openfort-docs",
+      "category": "wallets",
+      "llms": "https://docs.openfort.io/llms.txt"
+    },
+    {
+      "id": "bankr",
+      "category": "agents",
+      "note": "Agent wallets, token launch + fee claiming, Wallet API, @bankr/cli, x402 Cloud, LLM gateway",
+      "skill": "https://bankr.bot/skill.md",
+      "llms": "https://docs.bankr.bot/llms.txt"
+    },
+    {
+      "id": "zora-agents",
+      "category": "agents",
+      "note": "Agents on Zora: sponsored agent identity + creator coin via @zoralabs/cli",
+      "skill": "https://agents.zora.com/skill.md",
+      "llms": "https://agents.zora.com/llms.txt"
+    },
+    {
+      "id": "zora-coins",
+      "category": "agents",
+      "note": "Zora Coins SDK/contracts, referral rewards for integrators",
+      "skill": "https://docs.zora.co/skill.md",
+      "llms": "https://docs.zora.co/llms.txt"
+    },
+    {
+      "id": "virtuals",
+      "category": "agents",
+      "skill": "https://whitepaper.virtuals.io/skill.md",
+      "llms": "https://whitepaper.virtuals.io/llms.txt"
+    },
+    {
+      "id": "clanker",
+      "category": "agents",
+      "skill": "https://clanker.gitbook.io/skill.md",
+      "llms": "https://clanker.gitbook.io/llms.txt"
+    },
+    {
+      "id": "neynar",
+      "category": "agents",
+      "note": "Farcaster API",
+      "skill": "https://docs.neynar.com/skill.md",
+      "llms": "https://docs.neynar.com/llms.txt"
+    },
+    {
+      "id": "x402",
+      "category": "agents",
+      "note": "HTTP 402 machine payments",
+      "skill": "https://docs.x402.org/skill.md",
+      "llms": "https://docs.x402.org/llms.txt"
+    },
+    {
+      "id": "uniswap-docs",
+      "category": "defi",
+      "llms": "https://docs.uniswap.org/llms.txt"
+    },
+    {
+      "id": "cow",
+      "category": "defi",
+      "note": "CoW Swap: gasless intent-based swaps (solvers pay gas)",
+      "llms": "https://docs.cow.fi/llms.txt"
+    },
+    {
+      "id": "zeroex",
+      "category": "defi",
+      "note": "0x Swap/Gasless API",
+      "skill": "https://docs.0x.org/skill.md",
+      "llms": "https://docs.0x.org/llms.txt"
+    },
+    {
+      "id": "lifi",
+      "category": "defi",
+      "skill": "https://docs.li.fi/skill.md",
+      "llms": "https://docs.li.fi/llms.txt"
+    },
+    {
+      "id": "across-docs",
+      "category": "defi",
+      "llms": "https://docs.across.to/llms.txt"
+    },
+    {
+      "id": "aave-docs",
+      "category": "defi",
+      "llms": "https://aave.com/docs/llms.txt"
+    },
+    {
+      "id": "morpho",
+      "category": "defi",
+      "llms": "https://docs.morpho.org/llms.txt"
+    },
+    {
+      "id": "jupiter",
+      "category": "defi",
+      "skill": "https://docs.jup.ag/skill.md",
+      "llms": "https://docs.jup.ag/llms.txt"
+    },
+    {
+      "id": "polymarket",
+      "category": "defi",
+      "skill": "https://docs.polymarket.com/skill.md",
+      "llms": "https://docs.polymarket.com/llms.txt"
+    },
+    {
+      "id": "chainlink",
+      "category": "defi",
+      "note": "Includes Automation (keeper) docs",
+      "llms": "https://docs.chain.link/llms.txt"
+    },
+    {
+      "id": "lit",
+      "category": "defi",
+      "skill": "https://developer.litprotocol.com/skill.md",
+      "llms": "https://developer.litprotocol.com/llms.txt"
+    },
+    {
+      "id": "openzeppelin",
+      "category": "defi",
+      "llms": "https://docs.openzeppelin.com/llms.txt"
+    },
+    {
+      "id": "base-docs",
+      "category": "chains",
+      "skill": "https://docs.base.org/skill.md",
+      "llms": "https://docs.base.org/llms.txt"
+    },
+    {
+      "id": "optimism",
+      "category": "chains",
+      "skill": "https://docs.optimism.io/skill.md",
+      "llms": "https://docs.optimism.io/llms.txt"
+    },
+    {
+      "id": "arbitrum",
+      "category": "chains",
+      "llms": "https://docs.arbitrum.io/llms.txt"
+    },
+    {
+      "id": "polygon",
+      "category": "chains",
+      "skill": "https://docs.polygon.technology/skill.md",
+      "llms": "https://docs.polygon.technology/llms.txt"
+    },
+    {
+      "id": "gnosis",
+      "category": "chains",
+      "llms": "https://docs.gnosischain.com/llms.txt"
+    },
+    {
+      "id": "avalanche",
+      "category": "chains",
+      "llms": "https://build.avax.network/llms.txt"
+    },
+    {
+      "id": "solana",
+      "category": "chains",
+      "skill": "https://solana.com/skill.md",
+      "llms": "https://solana.com/llms.txt"
+    },
+    {
+      "id": "helius-docs",
+      "category": "chains",
+      "skill": "https://www.helius.dev/docs/skill.md",
+      "llms": "https://www.helius.dev/docs/llms.txt"
+    },
+    {
+      "id": "monad",
+      "category": "chains",
+      "skill": "https://docs.monad.xyz/skill.md",
+      "llms": "https://docs.monad.xyz/llms.txt"
+    },
+    {
+      "id": "megaeth",
+      "category": "chains",
+      "skill": "https://docs.megaeth.com/skill.md",
+      "llms": "https://docs.megaeth.com/llms.txt"
+    },
+    {
+      "id": "sei",
+      "category": "chains",
+      "skill": "https://docs.sei.io/skill.md",
+      "llms": "https://docs.sei.io/llms.txt"
+    },
+    {
+      "id": "berachain",
+      "category": "chains",
+      "skill": "https://docs.berachain.com/skill.md",
+      "llms": "https://docs.berachain.com/llms.txt"
+    },
+    {
+      "id": "world",
+      "category": "chains",
+      "skill": "https://docs.world.org/skill.md",
+      "llms": "https://docs.world.org/llms.txt"
+    }
+  ]
+}

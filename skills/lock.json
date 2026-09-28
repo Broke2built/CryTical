@@ -1,0 +1,1079 @@
+{
+  "git": {
+    "coinbase-agentic-wallet": {
+      "repo": "coinbase/agentic-wallet-skills",
+      "commit": "70cb79c85f397fab3636ef07c8c99dc52a7c555f",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "skills/agentic-wallet"
+      ]
+    },
+    "base": {
+      "repo": "base/skills",
+      "commit": "15adb8d9c75e5c7d1461e183a9021170a6ddbc08",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "skills/base-mcp",
+        "skills/build-on-base",
+        "skills/vibenet"
+      ]
+    },
+    "alchemy": {
+      "repo": "alchemyplatform/skills",
+      "commit": "4caf3e555c3af8dbb9e5b540aed558aef986d885",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "skills/agentic-gateway",
+        "skills/alchemy-api",
+        "skills/alchemy-cli",
+        "skills/alchemy-mcp",
+        "skills/ecosystem/allium",
+        "skills/ecosystem/opensea"
+      ]
+    },
+    "circle": {
+      "repo": "circlefin/skills",
+      "commit": "58ab8648bb1ae9d037a3bf5197ad3bb01262f5b1",
+      "license": "Apache-2.0",
+      "committed": true,
+      "skills": [
+        "plugins/circle/skills/accept-agent-payments",
+        "plugins/circle/skills/agent-wallet-policy",
+        "plugins/circle/skills/bridge-stablecoin",
+        "plugins/circle/skills/fund-agent-wallet",
+        "plugins/circle/skills/pay-via-agent-wallet",
+        "plugins/circle/skills/recover-eco-funds",
+        "plugins/circle/skills/swap-tokens",
+        "plugins/circle/skills/unify-balance",
+        "plugins/circle/skills/use-agent-wallet",
+        "plugins/circle/skills/use-arc",
+        "plugins/circle/skills/use-circle-cli",
+        "plugins/circle/skills/use-circle-wallets",
+        "plugins/circle/skills/use-developer-controlled-wallets",
+        "plugins/circle/skills/use-gateway",
+        "plugins/circle/skills/use-modular-wallets",
+        "plugins/circle/skills/use-smart-contract-platform",
+        "plugins/circle/skills/use-usdc",
+        "plugins/circle/skills/use-user-controlled-wallets"
+      ]
+    },
+    "candide": {
+      "repo": "candidelabs/skills",
+      "commit": "7dd54442b6d5e76efb0b87537b18a7ba47d196e8",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "skills/forwarding-address",
+        "skills/safe-passkeys",
+        "skills/safe-unified-account"
+      ]
+    },
+    "kora": {
+      "repo": "solana-foundation/kora",
+      "commit": "8293c4d2385c6a8b8e13a74001a9d434028a66bd",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        ".claude/skills/kora-client",
+        ".claude/skills/kora-operator"
+      ]
+    },
+    "zora-cli": {
+      "repo": "ourzora/zora-protocol",
+      "commit": "32c2931a444b4405b107a49016dff0059b05b06f",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "packages/cli",
+        "packages/cli/skills/auto-poster",
+        "packages/cli/skills/comment-engager",
+        "packages/cli/skills/copy-trader",
+        "packages/cli/skills/dca",
+        "packages/cli/skills/dm-responder",
+        "packages/cli/skills/early-buyer",
+        "packages/cli/skills/new-coin-screener",
+        "packages/cli/skills/onboarding",
+        "packages/cli/skills/pay",
+        "packages/cli/skills/portfolio-digest",
+        "packages/cli/skills/portfolio-rebalancer",
+        "packages/cli/skills/social-trader",
+        "packages/cli/skills/take-profit",
+        "packages/cli/skills/trend-sniper",
+        "packages/cli/skills/watchlist",
+        "packages/cli/skills/whale-watcher"
+      ]
+    },
+    "bankr-claude-plugins": {
+      "repo": "bankrbot/claude-plugins",
+      "commit": "67d33d4ee8e1680ce823eb9fe9ad371326c6b5ec",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "bankr-agent-dev/skills/bankr-api-basics",
+        "bankr-agent-dev/skills/bankr-api-workflow",
+        "bankr-agent-dev/skills/bankr-arbitrary-transaction",
+        "bankr-agent-dev/skills/bankr-automation",
+        "bankr-agent-dev/skills/bankr-client-patterns",
+        "bankr-agent-dev/skills/bankr-leverage-trading",
+        "bankr-agent-dev/skills/bankr-market-research",
+        "bankr-agent-dev/skills/bankr-nft-operations",
+        "bankr-agent-dev/skills/bankr-polymarket",
+        "bankr-agent-dev/skills/bankr-portfolio",
+        "bankr-agent-dev/skills/bankr-project-templates",
+        "bankr-agent-dev/skills/bankr-safety",
+        "bankr-agent-dev/skills/bankr-sign-submit-api",
+        "bankr-agent-dev/skills/bankr-token-deployment",
+        "bankr-agent-dev/skills/bankr-token-trading",
+        "bankr-agent-dev/skills/bankr-transfers",
+        "bankr-agent/skills/bankr-agent-profiles",
+        "bankr-agent/skills/bankr-arbitrary-transaction",
+        "bankr-agent/skills/bankr-automation",
+        "bankr-agent/skills/bankr-error-handling",
+        "bankr-agent/skills/bankr-job-workflow",
+        "bankr-agent/skills/bankr-leverage-trading",
+        "bankr-agent/skills/bankr-llm-gateway",
+        "bankr-agent/skills/bankr-market-research",
+        "bankr-agent/skills/bankr-nft-operations",
+        "bankr-agent/skills/bankr-polymarket",
+        "bankr-agent/skills/bankr-portfolio",
+        "bankr-agent/skills/bankr-safety",
+        "bankr-agent/skills/bankr-sign-submit-api",
+        "bankr-agent/skills/bankr-token-deployment",
+        "bankr-agent/skills/bankr-token-trading",
+        "bankr-agent/skills/bankr-transfers",
+        "x402-sdk-dev/skills/sdk-balance-queries",
+        "x402-sdk-dev/skills/sdk-capabilities",
+        "x402-sdk-dev/skills/sdk-job-management",
+        "x402-sdk-dev/skills/sdk-token-swaps",
+        "x402-sdk-dev/skills/sdk-transaction-builder",
+        "x402-sdk-dev/skills/sdk-wallet-operations",
+        "x402-sdk-dev/skills/x402-client-patterns",
+        "x402-sdk-dev/skills/x402-project-templates"
+      ]
+    },
+    "uniswap": {
+      "repo": "Uniswap/uniswap-ai",
+      "commit": "bff480cf461706e7087c04492b10140b6656ec23",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "packages/plugins/uniswap-cca/skills/configurator",
+        "packages/plugins/uniswap-cca/skills/deployer",
+        "packages/plugins/uniswap-driver/skills/liquidity-planner",
+        "packages/plugins/uniswap-driver/skills/swap-planner",
+        "packages/plugins/uniswap-hooks/skills/v4-hook-generator",
+        "packages/plugins/uniswap-hooks/skills/v4-security-foundations",
+        "packages/plugins/uniswap-permissioned-pools/skills/permissioned-pools-configurator",
+        "packages/plugins/uniswap-permissioned-pools/skills/permissioned-pools-deployer",
+        "packages/plugins/uniswap-permissioned-pools/skills/permissioned-pools-issuer",
+        "packages/plugins/uniswap-trading-tools/skills/copy-trade",
+        "packages/plugins/uniswap-trading-tools/skills/dca-bot",
+        "packages/plugins/uniswap-trading-tools/skills/index-bot",
+        "packages/plugins/uniswap-trading/skills/lp-integration",
+        "packages/plugins/uniswap-trading/skills/pay-with-any-token",
+        "packages/plugins/uniswap-trading/skills/pay-with-app",
+        "packages/plugins/uniswap-trading/skills/swap-integration",
+        "packages/plugins/uniswap-trading/skills/v4-sdk-integration",
+        "packages/plugins/uniswap-viem/skills/viem-integration"
+      ]
+    },
+    "aave": {
+      "repo": "aave/skills",
+      "commit": "24d1e2f96c83d30e9470d7492fe350284a36d517",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "plugins/mcp/skills/account-activity",
+        "plugins/mcp/skills/deleverage",
+        "plugins/mcp/skills/safe-transactions",
+        "plugins/mcp/skills/tx-confirmation",
+        "plugins/mcp/skills/yield-analysis"
+      ]
+    },
+    "openfort": {
+      "repo": "openfort-xyz/agent-skills",
+      "commit": "5a68f1221c60d6c17e831969ebe271f5b10aa035",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "skills/backend-wallet",
+        "skills/embedded-wallet",
+        "skills/openfort",
+        "skills/openfort-cli"
+      ]
+    },
+    "helius": {
+      "repo": "helius-labs/core-ai",
+      "commit": "21347a28f7d8042d60b5c85c86a80b841daf42a7",
+      "license": "MIT",
+      "committed": true,
+      "skills": [
+        "helius-skills/helius",
+        "helius-skills/helius-dflow",
+        "helius-skills/helius-jupiter",
+        "helius-skills/helius-okx",
+        "helius-skills/helius-phantom",
+        "helius-skills/svm"
+      ]
+    },
+    "cryptoskills": {
+      "repo": "naruto11eth/cryptoskills",
+      "commit": "7c156178d04776487d7343d8dddb37cca1d12a41",
+      "license": "Apache-2.0",
+      "committed": true,
+      "skills": [
+        "skills/aave",
+        "skills/account-abstraction",
+        "skills/aptos",
+        "skills/arbitrum",
+        "skills/arbitrum-stylus",
+        "skills/axelar",
+        "skills/base",
+        "skills/brian-api",
+        "skills/certora",
+        "skills/chainlink",
+        "skills/code-recon",
+        "skills/coinbase-agentkit",
+        "skills/coingecko",
+        "skills/compound",
+        "skills/contract-addresses",
+        "skills/crypto-skill-creator",
+        "skills/curve",
+        "skills/debridge",
+        "skills/dflow",
+        "skills/drift",
+        "skills/echidna",
+        "skills/eigenlayer",
+        "skills/eip-reference",
+        "skills/eliza",
+        "skills/ens",
+        "skills/eth-concepts",
+        "skills/ethers-js",
+        "skills/evm-nfts",
+        "skills/evm-testing",
+        "skills/farcaster",
+        "skills/foundry",
+        "skills/frontend-ux",
+        "skills/glam",
+        "skills/gmx",
+        "skills/goat",
+        "skills/halmos",
+        "skills/hardhat",
+        "skills/helius",
+        "skills/hyperlane",
+        "skills/hyperliquid",
+        "skills/jupiter",
+        "skills/kamino",
+        "skills/layerzero",
+        "skills/lido",
+        "skills/light-protocol",
+        "skills/lulo",
+        "skills/magicblock",
+        "skills/maker",
+        "skills/marginfi",
+        "skills/megaeth",
+        "skills/metaplex",
+        "skills/metengine",
+        "skills/meteora",
+        "skills/monad",
+        "skills/morpho",
+        "skills/mythril",
+        "skills/openzeppelin",
+        "skills/optimism",
+        "skills/orca",
+        "skills/pendle",
+        "skills/pinocchio",
+        "skills/polygon",
+        "skills/polymarket",
+        "skills/privy",
+        "skills/pumpfun",
+        "skills/pyth",
+        "skills/pyth-evm",
+        "skills/ranger-finance",
+        "skills/raydium",
+        "skills/redstone",
+        "skills/safe",
+        "skills/sanctum",
+        "skills/scaffold-eth-2",
+        "skills/sei",
+        "skills/semgrep-solidity",
+        "skills/slither",
+        "skills/solana-agent-kit",
+        "skills/solana-kit",
+        "skills/solana-kit-migration",
+        "skills/solana-simd",
+        "skills/solidity-auditor",
+        "skills/solidity-security",
+        "skills/squads",
+        "skills/starknet",
+        "skills/sui",
+        "skills/surfpool",
+        "skills/switchboard",
+        "skills/tenderly",
+        "skills/the-graph",
+        "skills/uniswap",
+        "skills/vertex",
+        "skills/viem",
+        "skills/vulnhunter",
+        "skills/wagmi",
+        "skills/wormhole",
+        "skills/x402",
+        "skills/zksync"
+      ]
+    },
+    "bankr-skills": {
+      "repo": "BankrBot/skills",
+      "commit": "66a4f08e95899c0dd2a9a8f3af5d8cb0e2d25a1e",
+      "license": "unspecified",
+      "committed": false,
+      "skills": [
+        "0xwork",
+        "1claw",
+        "BOTCOIN",
+        "aeon-autoresearch",
+        "aeon-deal-flow",
+        "aeon-deep-research",
+        "aeon-defi-monitor",
+        "aeon-defi-overview",
+        "aeon-distribute-tokens",
+        "aeon-hacker-news-digest",
+        "aeon-huggingface-trending",
+        "aeon-last30",
+        "aeon-monitor-kalshi",
+        "aeon-monitor-polymarket",
+        "aeon-monitor-runners",
+        "aeon-narrative-tracker",
+        "aeon-on-chain-monitor",
+        "aeon-paper-pick",
+        "aeon-reg-monitor",
+        "aeon-rss-digest",
+        "aeon-skill-evals",
+        "aeon-skill-repair",
+        "aeon-skill-security-scan",
+        "aeon-token-movers",
+        "aeon-token-pick",
+        "aeon-unlock-monitor",
+        "aeon-vuln-scanner",
+        "aero-stock-lp",
+        "agent-wormhole",
+        "agenticbets",
+        "ai2human-task-router",
+        "alchemy",
+        "autoboy",
+        "azzle",
+        "b20-console",
+        "bankr",
+        "bankr-communities",
+        "bankr-shopify",
+        "bankr-token-scam-analysis",
+        "bankr-twitter-agent",
+        "base",
+        "base-account",
+        "base-deploy",
+        "base-minikit",
+        "base-network",
+        "base-node",
+        "based-mining",
+        "berry-juicer",
+        "blueagent",
+        "botchan",
+        "capacitr",
+        "cattown",
+        "checkr",
+        "clanker",
+        "codegrid",
+        "coffer",
+        "coinhero",
+        "cortx",
+        "darksol-random-oracle",
+        "defi-native",
+        "delu-oracle",
+        "endaoment",
+        "ens-primary-name",
+        "erc-8004",
+        "ethskills-addresses",
+        "ethskills-audit",
+        "ethskills-building-blocks",
+        "ethskills-frontend-playbook",
+        "ethskills-frontend-ux",
+        "ethskills-gas",
+        "ethskills-indexing",
+        "ethskills-l2s",
+        "ethskills-orchestration",
+        "ethskills-qa",
+        "ethskills-security",
+        "ethskills-standards",
+        "ethskills-testing",
+        "ethskills-tools",
+        "ethskills-wallets",
+        "ethskills-why",
+        "gem-miner",
+        "github-vesting",
+        "gitlawb",
+        "gmfarcaster",
+        "grantr",
+        "harness",
+        "harness-capu",
+        "harness-collaboration",
+        "harness-venice",
+        "helixa",
+        "hermesone",
+        "hoodmarkets",
+        "hunch",
+        "hunch-bazaar",
+        "hydrex",
+        "juicebox-v6",
+        "lienfi",
+        "litcoin",
+        "lonestaroracle-data",
+        "megapot",
+        "metr-merchant-payments",
+        "moltycash",
+        "nexus-trading-labs",
+        "neynar",
+        "nookplot",
+        "onair-shoutout",
+        "onchainkit",
+        "opensea",
+        "opensea/opensea-api",
+        "opensea/opensea-marketplace",
+        "opensea/opensea-swaps",
+        "opensea/opensea-tool-sdk",
+        "opensea/opensea-wallet",
+        "orlix",
+        "pantheon-staking",
+        "pi-fire-science",
+        "pmfi-parbitrage",
+        "polygraph",
+        "productclank",
+        "qrcoin",
+        "quicknode",
+        "quotient",
+        "rhagent",
+        "rider-battle",
+        "signa",
+        "signals",
+        "siwa",
+        "skills/bankr-twitter-agent",
+        "skopos",
+        "sleuth-ai",
+        "splits",
+        "stakr",
+        "starchild-dao",
+        "suwappu-dex",
+        "symbiosis",
+        "trails",
+        "trustlayer-sybil-scanner",
+        "uniswap-cca",
+        "uniswap-driver",
+        "uniswap-hooks",
+        "uniswap-trading",
+        "uniswap-viem",
+        "urizen",
+        "veil",
+        "versa",
+        "voidly-pay",
+        "wake-token-spotter-analysis",
+        "waybackclaw",
+        "yoink",
+        "zapper",
+        "zerion",
+        "zyfai"
+      ]
+    },
+    "across": {
+      "repo": "across-protocol/skills",
+      "commit": "2b0ffd11824e3c97682ddb491c4ad141c4e0f5d0",
+      "license": "unspecified",
+      "committed": false,
+      "skills": [
+        "skills",
+        "skills/bridge",
+        "skills/embedded-crosschain-actions",
+        "skills/fetch-chains-tokens",
+        "skills/resources",
+        "skills/security",
+        "skills/swap",
+        "skills/tracking-transactions"
+      ]
+    }
+  },
+  "hosted": {
+    "safe": {
+      "category": "gas",
+      "llms": {
+        "url": "https://docs.safe.global/llms.txt",
+        "ok": true,
+        "bytes": 3603
+      }
+    },
+    "gelato": {
+      "category": "gas",
+      "skill": {
+        "url": "https://docs.gelato.cloud/skill.md",
+        "ok": false,
+        "bytes": 0
+      },
+      "llms": {
+        "url": "https://docs.gelato.cloud/llms.txt",
+        "ok": false,
+        "bytes": 0
+      }
+    },
+    "pimlico": {
+      "category": "gas",
+      "llms": {
+        "url": "https://docs.pimlico.io/llms.txt",
+        "ok": true,
+        "bytes": 87029
+      }
+    },
+    "zerodev": {
+      "category": "gas",
+      "llms": {
+        "url": "https://docs.zerodev.app/llms.txt",
+        "ok": true,
+        "bytes": 15342
+      }
+    },
+    "biconomy": {
+      "category": "gas",
+      "skill": {
+        "url": "https://docs.biconomy.io/skill.md",
+        "ok": true,
+        "bytes": 12504
+      },
+      "llms": {
+        "url": "https://docs.biconomy.io/llms.txt",
+        "ok": true,
+        "bytes": 32235
+      }
+    },
+    "alchemy-docs": {
+      "category": "gas",
+      "llms": {
+        "url": "https://www.alchemy.com/docs/llms.txt",
+        "ok": true,
+        "bytes": 472
+      }
+    },
+    "coinbase-cdp": {
+      "category": "gas",
+      "skill": {
+        "url": "https://docs.cdp.coinbase.com/skill.md",
+        "ok": true,
+        "bytes": 10874
+      },
+      "llms": {
+        "url": "https://docs.cdp.coinbase.com/llms.txt",
+        "ok": true,
+        "bytes": 59275
+      }
+    },
+    "candide-docs": {
+      "category": "gas",
+      "llms": {
+        "url": "https://docs.candide.dev/llms.txt",
+        "ok": true,
+        "bytes": 22996
+      }
+    },
+    "etherspot": {
+      "category": "gas",
+      "llms": {
+        "url": "https://etherspot.fyi/llms.txt",
+        "ok": true,
+        "bytes": 24447
+      }
+    },
+    "particle": {
+      "category": "gas",
+      "skill": {
+        "url": "https://docs.particle.network/skill.md",
+        "ok": true,
+        "bytes": 12376
+      },
+      "llms": {
+        "url": "https://docs.particle.network/llms.txt",
+        "ok": true,
+        "bytes": 28619
+      }
+    },
+    "thirdweb": {
+      "category": "gas",
+      "llms": {
+        "url": "https://portal.thirdweb.com/llms.txt",
+        "ok": true,
+        "bytes": 211217
+      }
+    },
+    "relay": {
+      "category": "gas",
+      "skill": {
+        "url": "https://docs.relay.link/skill.md",
+        "ok": true,
+        "bytes": 9215
+      },
+      "llms": {
+        "url": "https://docs.relay.link/llms.txt",
+        "ok": true,
+        "bytes": 20029
+      }
+    },
+    "abstract": {
+      "category": "gas",
+      "skill": {
+        "url": "https://docs.abs.xyz/skill.md",
+        "ok": true,
+        "bytes": 10967
+      },
+      "llms": {
+        "url": "https://docs.abs.xyz/llms.txt",
+        "ok": true,
+        "bytes": 28136
+      }
+    },
+    "circle-docs": {
+      "category": "wallets",
+      "skill": {
+        "url": "https://developers.circle.com/skill.md",
+        "ok": true,
+        "bytes": 12639
+      },
+      "llms": {
+        "url": "https://developers.circle.com/llms.txt",
+        "ok": true,
+        "bytes": 17056
+      }
+    },
+    "privy": {
+      "category": "wallets",
+      "skill": {
+        "url": "https://docs.privy.io/skill.md",
+        "ok": true,
+        "bytes": 11883
+      },
+      "llms": {
+        "url": "https://docs.privy.io/llms.txt",
+        "ok": true,
+        "bytes": 79063
+      }
+    },
+    "turnkey": {
+      "category": "wallets",
+      "skill": {
+        "url": "https://docs.turnkey.com/skill.md",
+        "ok": true,
+        "bytes": 13083
+      },
+      "llms": {
+        "url": "https://docs.turnkey.com/llms.txt",
+        "ok": true,
+        "bytes": 3825
+      }
+    },
+    "crossmint": {
+      "category": "wallets",
+      "skill": {
+        "url": "https://docs.crossmint.com/skill.md",
+        "ok": true,
+        "bytes": 10759
+      },
+      "llms": {
+        "url": "https://docs.crossmint.com/llms.txt",
+        "ok": true,
+        "bytes": 70187
+      }
+    },
+    "dynamic": {
+      "category": "wallets",
+      "skill": {
+        "url": "https://docs.dynamic.xyz/skill.md",
+        "ok": true,
+        "bytes": 3222
+      },
+      "llms": {
+        "url": "https://docs.dynamic.xyz/llms.txt",
+        "ok": true,
+        "bytes": 4556
+      }
+    },
+    "openfort-docs": {
+      "category": "wallets",
+      "llms": {
+        "url": "https://docs.openfort.io/llms.txt",
+        "ok": true,
+        "bytes": 77143
+      }
+    },
+    "bankr": {
+      "category": "agents",
+      "skill": {
+        "url": "https://bankr.bot/skill.md",
+        "ok": true,
+        "bytes": 20934
+      },
+      "llms": {
+        "url": "https://docs.bankr.bot/llms.txt",
+        "ok": true,
+        "bytes": 25473
+      }
+    },
+    "zora-agents": {
+      "category": "agents",
+      "skill": {
+        "url": "https://agents.zora.com/skill.md",
+        "ok": true,
+        "bytes": 34584
+      },
+      "llms": {
+        "url": "https://agents.zora.com/llms.txt",
+        "ok": true,
+        "bytes": 6031
+      }
+    },
+    "zora-coins": {
+      "category": "agents",
+      "skill": {
+        "url": "https://docs.zora.co/skill.md",
+        "ok": true,
+        "bytes": 15097
+      },
+      "llms": {
+        "url": "https://docs.zora.co/llms.txt",
+        "ok": true,
+        "bytes": 4444
+      }
+    },
+    "virtuals": {
+      "category": "agents",
+      "skill": {
+        "url": "https://whitepaper.virtuals.io/skill.md",
+        "ok": true,
+        "bytes": 2096
+      },
+      "llms": {
+        "url": "https://whitepaper.virtuals.io/llms.txt",
+        "ok": true,
+        "bytes": 20538
+      }
+    },
+    "clanker": {
+      "category": "agents",
+      "skill": {
+        "url": "https://clanker.gitbook.io/skill.md",
+        "ok": true,
+        "bytes": 2055
+      },
+      "llms": {
+        "url": "https://clanker.gitbook.io/llms.txt",
+        "ok": true,
+        "bytes": 9061
+      }
+    },
+    "neynar": {
+      "category": "agents",
+      "skill": {
+        "url": "https://docs.neynar.com/skill.md",
+        "ok": true,
+        "bytes": 10938
+      },
+      "llms": {
+        "url": "https://docs.neynar.com/llms.txt",
+        "ok": true,
+        "bytes": 95101
+      }
+    },
+    "x402": {
+      "category": "agents",
+      "skill": {
+        "url": "https://docs.x402.org/skill.md",
+        "ok": true,
+        "bytes": 12712
+      },
+      "llms": {
+        "url": "https://docs.x402.org/llms.txt",
+        "ok": true,
+        "bytes": 6189
+      }
+    },
+    "uniswap-docs": {
+      "category": "defi",
+      "llms": {
+        "url": "https://docs.uniswap.org/llms.txt",
+        "ok": true,
+        "bytes": 47916
+      }
+    },
+    "cow": {
+      "category": "defi",
+      "llms": {
+        "url": "https://docs.cow.fi/llms.txt",
+        "ok": true,
+        "bytes": 20780
+      }
+    },
+    "zeroex": {
+      "category": "defi",
+      "skill": {
+        "url": "https://docs.0x.org/skill.md",
+        "ok": true,
+        "bytes": 267
+      },
+      "llms": {
+        "url": "https://docs.0x.org/llms.txt",
+        "ok": true,
+        "bytes": 15326
+      }
+    },
+    "lifi": {
+      "category": "defi",
+      "skill": {
+        "url": "https://docs.li.fi/skill.md",
+        "ok": true,
+        "bytes": 11961
+      },
+      "llms": {
+        "url": "https://docs.li.fi/llms.txt",
+        "ok": true,
+        "bytes": 36316
+      }
+    },
+    "across-docs": {
+      "category": "defi",
+      "llms": {
+        "url": "https://docs.across.to/llms.txt",
+        "ok": true,
+        "bytes": 17217
+      }
+    },
+    "aave-docs": {
+      "category": "defi",
+      "llms": {
+        "url": "https://aave.com/docs/llms.txt",
+        "ok": true,
+        "bytes": 15692
+      }
+    },
+    "morpho": {
+      "category": "defi",
+      "llms": {
+        "url": "https://docs.morpho.org/llms.txt",
+        "ok": true,
+        "bytes": 15295
+      }
+    },
+    "jupiter": {
+      "category": "defi",
+      "skill": {
+        "url": "https://docs.jup.ag/skill.md",
+        "ok": true,
+        "bytes": 11737
+      },
+      "llms": {
+        "url": "https://docs.jup.ag/llms.txt",
+        "ok": true,
+        "bytes": 34580
+      }
+    },
+    "polymarket": {
+      "category": "defi",
+      "skill": {
+        "url": "https://docs.polymarket.com/skill.md",
+        "ok": true,
+        "bytes": 12425
+      },
+      "llms": {
+        "url": "https://docs.polymarket.com/llms.txt",
+        "ok": true,
+        "bytes": 13648
+      }
+    },
+    "chainlink": {
+      "category": "defi",
+      "llms": {
+        "url": "https://docs.chain.link/llms.txt",
+        "ok": true,
+        "bytes": 10902
+      }
+    },
+    "lit": {
+      "category": "defi",
+      "skill": {
+        "url": "https://developer.litprotocol.com/skill.md",
+        "ok": true,
+        "bytes": 10199
+      },
+      "llms": {
+        "url": "https://developer.litprotocol.com/llms.txt",
+        "ok": true,
+        "bytes": 10472
+      }
+    },
+    "openzeppelin": {
+      "category": "defi",
+      "llms": {
+        "url": "https://docs.openzeppelin.com/llms.txt",
+        "ok": true,
+        "bytes": 70961
+      }
+    },
+    "base-docs": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.base.org/skill.md",
+        "ok": true,
+        "bytes": 11649
+      },
+      "llms": {
+        "url": "https://docs.base.org/llms.txt",
+        "ok": true,
+        "bytes": 45520
+      }
+    },
+    "optimism": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.optimism.io/skill.md",
+        "ok": true,
+        "bytes": 13359
+      },
+      "llms": {
+        "url": "https://docs.optimism.io/llms.txt",
+        "ok": true,
+        "bytes": 72981
+      }
+    },
+    "arbitrum": {
+      "category": "chains",
+      "llms": {
+        "url": "https://docs.arbitrum.io/llms.txt",
+        "ok": true,
+        "bytes": 56015
+      }
+    },
+    "polygon": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.polygon.technology/skill.md",
+        "ok": true,
+        "bytes": 34497
+      },
+      "llms": {
+        "url": "https://docs.polygon.technology/llms.txt",
+        "ok": true,
+        "bytes": 96832
+      }
+    },
+    "gnosis": {
+      "category": "chains",
+      "llms": {
+        "url": "https://docs.gnosischain.com/llms.txt",
+        "ok": true,
+        "bytes": 882064
+      }
+    },
+    "avalanche": {
+      "category": "chains",
+      "llms": {
+        "url": "https://build.avax.network/llms.txt",
+        "ok": true,
+        "bytes": 11654
+      }
+    },
+    "solana": {
+      "category": "chains",
+      "skill": {
+        "url": "https://solana.com/skill.md",
+        "ok": true,
+        "bytes": 2777
+      },
+      "llms": {
+        "url": "https://solana.com/llms.txt",
+        "ok": true,
+        "bytes": 100848
+      }
+    },
+    "helius-docs": {
+      "category": "chains",
+      "skill": {
+        "url": "https://www.helius.dev/docs/skill.md",
+        "ok": true,
+        "bytes": 10378
+      },
+      "llms": {
+        "url": "https://www.helius.dev/docs/llms.txt",
+        "ok": true,
+        "bytes": 33185
+      }
+    },
+    "monad": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.monad.xyz/skill.md",
+        "ok": true,
+        "bytes": 12031
+      },
+      "llms": {
+        "url": "https://docs.monad.xyz/llms.txt",
+        "ok": true,
+        "bytes": 23832
+      }
+    },
+    "megaeth": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.megaeth.com/skill.md",
+        "ok": true,
+        "bytes": 1937
+      },
+      "llms": {
+        "url": "https://docs.megaeth.com/llms.txt",
+        "ok": true,
+        "bytes": 30838
+      }
+    },
+    "sei": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.sei.io/skill.md",
+        "ok": true,
+        "bytes": 12805
+      },
+      "llms": {
+        "url": "https://docs.sei.io/llms.txt",
+        "ok": true,
+        "bytes": 35607
+      }
+    },
+    "berachain": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.berachain.com/skill.md",
+        "ok": true,
+        "bytes": 10880
+      },
+      "llms": {
+        "url": "https://docs.berachain.com/llms.txt",
+        "ok": true,
+        "bytes": 24434
+      }
+    },
+    "world": {
+      "category": "chains",
+      "skill": {
+        "url": "https://docs.world.org/skill.md",
+        "ok": true,
+        "bytes": 12256
+      },
+      "llms": {
+        "url": "https://docs.world.org/llms.txt",
+        "ok": true,
+        "bytes": 21076
+      }
+    }
+  }
+}

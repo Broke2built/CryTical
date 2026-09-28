@@ -1,0 +1,33 @@
+{
+  "$comment": "Treasury policy. One central treasury receives all earnings; ops wallets are topped up from it only when a strategy needs funds, and swept back when they hold more than they need. Amounts are USD-equivalent. The agent may tune these within the hard caps, never beyond them.",
+  "treasury": {
+    "wallet": "treasury",
+    "settlementChain": "base",
+    "neverSignsStrategyTxs": true
+  },
+  "ops": {
+    "ops-evm": {
+      "chains": ["base", "optimism", "arbitrum", "polygon", "gnosis", "unichain"],
+      "floorUsd": 0,
+      "targetUsd": 2,
+      "sweepAboveUsd": 5
+    },
+    "ops-sol": {
+      "chains": ["solana"],
+      "floorUsd": 0,
+      "targetUsd": 2,
+      "sweepAboveUsd": 5
+    }
+  },
+  "hardCaps": {
+    "$comment": "Cannot be raised by the agent. Change by hand only.",
+    "maxTopUpUsdPerDay": 10,
+    "maxSingleTxUsd": 5,
+    "maxOpsBalanceUsd": 25
+  },
+  "sweep": {
+    "intervalMinutes": 60,
+    "preferSponsoredGas": true,
+    "skipIfGasCostExceedsPct": 10
+  }
+}

@@ -1,0 +1,56 @@
+# ─── Secrets: NEVER commit ────────────────────────────────────────────
+# Wallets, keystores, seed phrases, API keys. Generated locally by
+# `npm run bootstrap` and unique to every install.
+.wallets/
+*.keystore
+*.keystore.json
+*.key
+*.pem
+*mnemonic*
+*seed*phrase*
+*private*key*
+.env
+.env.*
+!.env.example
+# Vendored skill docs can have names like adapter-private-key.md; keep them.
+!skills/vendor/**/*.md
+
+# Tool-managed credential dirs some CLIs create inside a project
+.bankr/
+.zora/
+.config/
+
+# ─── Runtime state ────────────────────────────────────────────────────
+state/
+data/
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+checkpoints/
+runs/
+
+# ─── Skills fetched at sync time (not redistributed in this repo) ──────
+# Hosted skill.md / llms.txt files and repos without an explicit license
+# are pulled by `npm run skills:sync` into this folder on each install.
+skills/external/
+.skills-cache/
+
+# ─── Node / Python / build ────────────────────────────────────────────
+node_modules/
+dist/
+build/
+coverage/
+.cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ─── Editors / OS ─────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
