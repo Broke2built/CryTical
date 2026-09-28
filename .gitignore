@@ -12,6 +12,8 @@
 .env
 .env.*
 !.env.example
+# Vendored skill docs can have names like adapter-private-key.md; keep them.
+!skills/vendor/**/*.md
 
 # Tool-managed credential dirs some CLIs create inside a project
 .bankr/
