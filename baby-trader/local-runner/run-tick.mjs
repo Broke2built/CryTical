@@ -14,7 +14,7 @@
 // Imports ../worker.js, builds a fake `env`, and invokes the worker's
 // scheduled() handler — the same entry point Cloudflare cron used.
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, openSync, writeSync, closeSync, unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { LocalKV } from './kv-local.mjs';
@@ -26,7 +26,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // Without this gate, the tick hangs for 300s on dead RPC calls, blocking all
 // trading. With it, we skip in <1s and the next tick retries.
 try {
-  const egressState = JSON.parse(readFileSync('/home/hatch/workspace/tools/egress-state.json', 'utf8'));
+  const egressState = JSON.parse(readFileSync(process.env.EGRESS_STATE_FILE || '/home/hatch/workspace/tools/egress-state.json', 'utf8'));
   const ageMs = Date.now() - new Date(egressState.checked_at).getTime();
   if (egressState.verdict === 'wedged' && ageMs < 10 * 60 * 1000) {
     console.log(`[${new Date().toISOString()}] tick skipped: egress wedged (state age ${Math.round(ageMs/1000)}s) — fail fast, retry next tick`);
@@ -61,7 +61,39 @@ try {
 
 // --- local KV ---
 const KV_FILE = process.env.KV_FILE || resolve(HERE, 'kv-store.json');
-const kv = new LocalKV(KV_FILE);
+// (review) Coalesced writes: money-critical keys still hit disk before put() resolves;
+// the rest is flushed once at the end of the tick. KV_WRITE_THROUGH=1 restores the old
+// fsync-every-put behavior. See kv-local.mjs.
+const kv = new LocalKV(KV_FILE, { deferNonCritical: process.env.KV_WRITE_THROUGH !== '1' });
+
+// --- (review) PROCESS LOCK: never two ticks at once ---
+// The worker's own meta:tickLock is a 45s timestamp in KV — fine for one process, but
+// a cron line + a manual run (or a tick that outlives 60s) could still overlap and
+// double-trade. This is an OS-level exclusive lock file next to the KV store. A lock
+// whose PID is dead (crash, kill -9, reboot) is stale and gets taken over.
+const LOCK_FILE = `${KV_FILE}.lock`;
+function acquireLock() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const fd = openSync(LOCK_FILE, 'wx', 0o600);
+      writeSync(fd, String(process.pid)); closeSync(fd);
+      process.on('exit', () => { try { unlinkSync(LOCK_FILE); } catch { /* already gone */ } });
+      return true;
+    } catch (e) {
+      if (e.code !== 'EEXIST') throw e;
+      const pid = parseInt(readFileSync(LOCK_FILE, 'utf8'), 10);
+      let alive = false;
+      try { if (pid > 0) { process.kill(pid, 0); alive = true; } } catch (k) { alive = k.code === 'EPERM'; }
+      if (alive) return false;
+      try { unlinkSync(LOCK_FILE); } catch { /* raced */ }
+    }
+  }
+  return false;
+}
+if (!acquireLock()) {
+  console.log(`[${new Date().toISOString()}] tick skipped: another tick holds ${LOCK_FILE}`);
+  process.exit(0);
+}
 
 // --- fake worker env ---
 const env = {
@@ -95,9 +127,11 @@ if (!mod.default || typeof mod.default.scheduled !== 'function') {
 try {
   await mod.default.scheduled({}, env, {});
 } catch (e) {
+  kv.flush();
   console.error(`FATAL: tick threw: ${e && e.stack ? e.stack : e}`);
   process.exit(1);
 }
+kv.flush(); // persist the tick's deferred (non-critical) writes
 
 // The scheduled handler persists its log lines to meta:lastTickLog — print them.
 const logText = await kv.get('meta:lastTickLog');

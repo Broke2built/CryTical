@@ -1730,7 +1730,10 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
     ethBalPostBuy: (ethBal - buyWei - buyGasWei).toString(),
   };
   await kvPutCritical(env, `wallet:${i}:position`, position, log);
-  await kvPut(env, `wallet:${i}:pendingBuy`, null); // position is durable — write-ahead consumed
+  // Write-ahead consumed. Must NOT throw: on Cloudflare KV this is the 2nd write to the
+  // same key within ~1s (limit 1 write/s/key -> 429), and a throw here would abort
+  // executeBuy AFTER the buy landed, skipping lastTrade + buyLog. A stale record is harmless.
+  await kvPut(env, `wallet:${i}:pendingBuy`, null).catch(() => {});
   await kvPutCritical(env, `wallet:${i}:lastTrade`, Date.now(), log);
   log(`BOUGHT ${formatEther(balAfter)} BRAWL for $${buyCostUsd.toFixed(4)} (+$${buyGasUsd.toFixed(4)} gas) tx ${hash}`);
   // ---- Fleet buy log (2026-10-07 23:05 EDT, superintelligence #3 FOMO-exploit) ----
@@ -3177,6 +3180,12 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/tick' && request.method === 'POST') {
+      // (review) This endpoint runs a REAL trading tick for anyone who can reach the
+      // worker URL. Set the TICK_TOKEN secret and send it as `x-tick-token`; when the
+      // secret is set, requests without it are refused. Unset = legacy open behavior.
+      if (env.TICK_TOKEN && request.headers.get('x-tick-token') !== env.TICK_TOKEN) {
+        return new Response('forbidden', { status: 403 });
+      }
       const lines = [];
       const log = (m) => {
         const line = `[${new Date().toISOString()}] ${m}`;

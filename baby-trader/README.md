@@ -11,4 +11,4 @@ npm run tournament   # babies fight on a simulated thin AMM, survival of the fit
 npm run fork         # babies fight on a private Base fork with the real worker.js (needs foundry's anvil)
 ```
 
-Live: `KEYS_FILE=... DRY_RUN=true node local-runner/run-tick.mjs` first, then without DRY_RUN.
+Live (local PC, recommended): `KEYS_FILE=... KV_FILE=... DRY_RUN=true node local-runner/loop.mjs` — one non-overlapping tick per minute. See `CLOUDFLARE-NOTES.md` for why not Cloudflare and how to run it under pm2/systemd.
