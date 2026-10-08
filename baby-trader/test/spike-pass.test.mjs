@@ -159,3 +159,28 @@ test('spike attribution: owner SELLING into the spike is not "owner-driven"; use
   r = await __internal.isOwnerDrivenSpike(client([...old, ...recent]), () => {});
   assert.equal(r.ownerDriven, false, 'recent outsider buys decide, not stale owner buys');
 });
+
+test('owner-driven spike: holding branch also refuses to take profit into the owner buy', async () => {
+  const price = 1e-8;
+  const chain = new FakeChain({ priceWeth: price }).install();
+  try {
+    const kv = new MemKV();
+    const now = Date.now();
+    chain.tokens.set(W0.toLowerCase(), 10n ** 22n);
+    chain.eth.set(W0.toLowerCase(), 10n ** 14n);
+    kv.set('wallet:0:seed', { dip: 40, margin: 3, size: 70, cooldownMin: 10 });
+    kv.set('wallet:0:qgridver', 10);
+    kv.set('wallet:0:lastTrade', now - 3600e3);
+    kv.set('wallet:0:position', holdingPosition(now, 1));
+    spikeMarket(kv, price, now);
+    chain.sellQuoteMult = 1.3; // target met by a wide margin
+    const pid = __internal.poolId();
+    chain.swapLogs = [{ topics: [SWAP_TOPIC0, pid], data: '0x' + (10n ** 20n).toString(16).padStart(64, '0') + '00'.repeat(160), transactionHash: '0xown' }];
+    chain.txByHash.set('0xown', { from: __internal.OWNER_EOA });
+    const env = { TRADER_KV: kv, DRY_RUN: 'false', RPC_URLS: 'http://fake-rpc', ZORA_API_KEY: 'x', BURNER_KEY_0: generatePrivateKey() };
+    const log = await tickFull(env);
+    assert.match(log, /OWNER SPIKE HOLD/);
+    assert.equal(chain.sent.filter((s) => s.kind === '0x5e').length, 0, 'no sell into the owner buy');
+    assert.ok(kv.json('wallet:0:position'), 'still holding');
+  } finally { chain.uninstall(); }
+});
