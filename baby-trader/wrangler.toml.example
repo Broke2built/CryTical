@@ -1,0 +1,35 @@
+# wrangler.toml — copy to wrangler.toml and fill the TODOs. Durable Object mode.
+# Docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+#       https://developers.cloudflare.com/durable-objects/get-started/
+name = "baby-trader"
+main = "cloudflare.js"   # NOT worker.js — see cloudflare.js
+compatibility_date = "2025-09-01"
+
+# The fleet runs inside ONE Durable Object ("fleet"), ticking on its own alarm.
+[[durable_objects.bindings]]
+name = "TRADER"
+class_name = "TraderDO"
+
+# First deploy creates the class. Never edit or remove a migration after deploying it.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TraderDO"]
+
+# Watchdog only: re-arms the DO alarm if it was ever lost. The DO is the clock.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+DRY_RUN = "true"                 # flip to "false" only after a clean dry day (npm run status -- --remote)
+TICK_INTERVAL_MS = "60000"       # must stay > 45000 (the bot's own 45 s tick lock would skip every other tick)
+RPC_URLS = "https://base-rpc.publicnode.com,https://mainnet.base.org"   # TODO: put a keyed RPC first
+
+# Secrets (never in this file):  npx wrangler secret put <NAME>
+#   TICK_TOKEN                  long random string; protects /health /pause /resume /tick /import /export
+#   ZORA_API_KEY
+#   BURNER_KEY_0 ... BURNER_KEY_15
+#
+# Optional, ONLY for migrating old state: keep the old KV binding to export from it once.
+# [[kv_namespaces]]
+# binding = "TRADER_KV"
+# id = "TODO-old-namespace-id"
