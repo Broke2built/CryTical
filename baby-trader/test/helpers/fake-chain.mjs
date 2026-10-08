@@ -27,6 +27,8 @@ export class FakeChain {
     this.calls = [];
     this.sent = [];
     this.receipts = new Map();
+    this.swapLogs = [];          // craftable Swap logs (spike-attribution tests)
+    this.txByHash = new Map();   // txHash(lower) -> { from }
   }
   setPrice(p) {
     // sqrtPriceX96 = sqrt(price) * 2^96  (sq = sqrtPriceX96^2 is LINEAR in price)
@@ -40,7 +42,12 @@ export class FakeChain {
       case 'eth_chainId': return '0x2105';
       case 'eth_blockNumber': return hex(this.block);
       case 'eth_gasPrice': return hex(this.gasPrice);
-      case 'eth_getLogs': return [];
+      case 'eth_getLogs': return this.swapLogs;
+      case 'eth_getTransactionByHash': {
+        const t = this.txByHash.get(String(params[0]).toLowerCase());
+        if (!t) throw new Error(`FakeChain: unknown tx ${params[0]}`);
+        return t;
+      }
       case 'eth_estimateGas': return hex(150000);
       case 'eth_getTransactionCount': return hex(this.sent.length);
       case 'eth_getBalance': return hex(this.bal(this.eth, params[0]));

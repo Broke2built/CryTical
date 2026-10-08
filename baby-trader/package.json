@@ -3,6 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "status": "node local-runner/doctor.mjs",
+    "start": "node local-runner/loop.mjs",
     "test": "node --test test/*.test.mjs",
     "tournament": "node sim/tournament.mjs --scenario mixed --generations 20",
     "fetch-real": "node sim/fetch-real.mjs",

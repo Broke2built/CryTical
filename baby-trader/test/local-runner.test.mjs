@@ -103,3 +103,19 @@ test('per-tick budget: worst case (16 buys / 16 sells) stays under Workers Paid 
     }
   } finally { chain.uninstall(); }
 });
+
+test('doctor: plain-English status with a FIX for each problem', async () => {
+  const { diagnose } = await import('../local-runner/doctor.mjs');
+  const now = Date.now();
+  const kv = { 'wallet:0:position': JSON.stringify({ amountWei: (10n ** 22n).toString() }) };
+  const ok = diagnose({ now, heartbeat: { ts: now - 30e3, consecutiveFails: 0 }, logLines: ['x tick exit=0'], kv, chain: null });
+  assert.equal(ok.filter((f) => f.level === 'bad' || f.level === 'warn').length, 0, JSON.stringify(ok));
+  const dead = diagnose({ now, heartbeat: { ts: now - 20 * 60e3, consecutiveFails: 4, lastExit: 1 },
+    logLines: ['SAFE-ABORT', 'SAFE-ABORT', 'SAFE-ABORT', 'tick exit=0', 'tick exit=137 KILLED (hung > 15m — check orphans)'], kv,
+    chain: { tokens: Array(16).fill(0n), eth: Array(16).fill(0n) } });
+  const bads = dead.filter((f) => f.level === 'bad');
+  assert.ok(bads.length >= 3, JSON.stringify(dead.map((f) => f.what)));
+  assert.ok(dead.every((f) => f.level === 'info' || f.fix), 'every problem has a FIX');
+  assert.ok(dead.some((f) => /GHOST/.test(f.what)), 'KV says holding, chain empty');
+  assert.equal(diagnose({ now, heartbeat: null, logLines: [], kv: null, chain: null })[0].level, 'bad');
+});

@@ -21,8 +21,9 @@ test('price orientation: coin above WETH is inverted back to WETH-per-coin', () 
 });
 
 test('decodeSwap uses the COIN side of the pool, whichever currency it is', () => {
-  // coin is currency1: pool pays out 5e18 coin (amount1 = -5e18), takes 0.01 WETH (amount0 = +1e16)
-  const log = { data: '0x' + word(10n ** 16n) + word(-(5n * 10n ** 18n)) + word(0).repeat(4), topics: [SWAP_TOPIC0] };
+  // coin is currency1. V4 deltas are the TRADER's: trader receives 5e18 coin (amount1 = +5e18)
+  // and pays 0.01 WETH (amount0 = -1e16) -> a BUY.
+  const log = { data: '0x' + word(-(10n ** 16n)) + word(5n * 10n ** 18n) + word(0).repeat(4), topics: [SWAP_TOPIC0] };
   const s = decodeSwap(log, HIGH);
   assert.equal(s.traderBought, true);
   assert.equal(s.coinUnits, 5);
@@ -70,3 +71,13 @@ test('fresh coin: launch pullback needs external buyers; dead coin never signals
 });
 
 test('WETH constant sanity', () => assert.equal(WETH.toLowerCase(), '0x4200000000000000000000000000000000000006'));
+
+test('V4 sign convention pinned to REAL Base swaps (buy and sell, coin as currency0 and currency1)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const fx = JSON.parse(readFileSync(new URL('./fixtures/v4-swaps.json', import.meta.url)));
+  assert.ok(fx.length >= 2);
+  for (const f of fx) {
+    // traderBoughtCoin was derived from the tx's ERC-20 Transfer logs (coin left the PoolManager).
+    assert.equal(decodeSwap({ data: f.data }, f.coin).traderBought, f.traderBoughtCoin, `tx ${f.tx}`);
+  }
+});

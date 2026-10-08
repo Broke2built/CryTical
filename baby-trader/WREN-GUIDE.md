@@ -56,7 +56,7 @@ The same lesson shows up in the numbers. In the tournament's `dead` scenario (no
 - **Gas bar.** The brief says 2× gas, the code says 1.5×. Pick one.
 - **Bankroll vs gas.** About 3% gas per tx means a position needs roughly a +10–15% move before it is allowed to sell. This, not missing features, is why babies sit still. Fewer, larger positions would let them trade.
 - **Thresholds.** Crash 30–60% and dip 70–90% almost never fire. A 30%+ **one-tick** crash can never be bought, because the 20% circuit breaker halts trading first. The tournament has `--grid tight` (5–20% / 10–30%). In my runs the tight grid traded 3–4× more but lost in the bubble scenario. **Test before changing.** A grid change wipes Q-tables, which costs nothing because they're fabricated anyway (#8).
-- **Spike pass.** It tries to sell every holding wallet in the same tick, the synchronized pattern you already banned. If the spike is Anthony buying, the fleet sells into its own owner.
+- **Spike pass.** FIXED 2026-10-08 by Wren: it no longer sells every holding wallet in one tick. Now (1) the spike is attributed — if the dominant buy volume is the owner/fleet, the fleet holds instead of selling into its own buy; (2) only wallets whose OWN target (max(1.5× gas, margin)) is met may exit; (3) at most 4 spike exits per tick, highest conviction first, the rest via the normal holding branch. Fail-open: unattributable spikes are treated as outside buyers.
 
 ## 3. The #1 learning-design change
 

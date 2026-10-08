@@ -134,8 +134,12 @@ try {
 kv.flush(); // persist the tick's deferred (non-critical) writes
 
 // The scheduled handler persists its log lines to meta:lastTickLog — print them.
-const logText = await kv.get('meta:lastTickLog');
-console.log(logText || '(tick completed but wrote no log lines)');
+// (review) Not under loop.mjs: the worker already console.logs every line live, so the
+// loop's tick.log would get each line twice.
+if (!process.env.LOOP_CHILD) {
+  const logText = await kv.get('meta:lastTickLog');
+  console.log(logText || '(tick completed but wrote no log lines)');
+}
 // (review) Exit explicitly. Leftover timers used to keep this process alive ~2 min after
 // every tick (worker.js raceTimeout fixes the cause; this is the belt to those braces).
 process.exit(0);

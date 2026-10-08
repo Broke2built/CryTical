@@ -231,6 +231,16 @@ const SEED_STEP = 7919;
 
 // Risk config
 const SPIKE_PCT = 10;             // >10% up in one tick = likely Anthony -> sell into it
+// (Wren 2026-10-08: spike-pass fix) owner/fleet attribution set for spike exits.
+// If a spike's dominant buy volume came from these addresses, the fleet HOLDS —
+// selling into the owner's (or its own siblings') buy is the same beneficial
+// owner on both sides of the flow.
+const OWNER_EOA = '0xa0ed3829C5d349833a7096181A14E5784962f8cb';   // Anthony's EOA
+const ORBX_WALLET = '0x430e239b96d9a8fbafdbed30405d8f14d0b36631';  // @orbx
+const FLEET_SW = '0x295Df5a0E7462f3Ce8929C3722CD17E257BA98B5';     // smart wallet (babies' home)
+const SPIKE_MAX_EXITS_PER_TICK = 4;  // stagger: at most 4 spike exits per tick
+const SPIKE_ATTRIB_BLOCKS = 60;      // attribution window: ~2 min of swaps
+const SPIKE_ATTRIB_MAX_TX = 12;      // cap tx lookups per spike
 const QUIET_MOVE_BPS = 50;        // <0.50% tick-to-tick move = quiet tick, skip trading (Anthony 2026-10-07)
 const STOP_LOSS_PCT = 18;         // down 18%+ ... (WAS 20, deadlock breaker 2026-10-08 01:20 EDT)
 // TEMPORARY (Anthony 2026-10-08 01:20 EDT "get them trading NOW"): 24h -> 2h to break the
@@ -665,10 +675,65 @@ function bottomSignal(aboveLowPct, lowAgeMs) {
 
 // EYES #3+#6: swap flow from PoolManager Swap events (last ~10 min).
 // Address-only getLogs (Reth rejects topics arrays — TOOLS.md), client-side filter
-// by Swap topic0 + our poolId. amount0 is the BRAWL delta FOR THE POOL:
-//   amount0 < 0 → pool paid BRAWL out → trader BOUGHT BRAWL
-//   amount0 > 0 → trader sold BRAWL into the pool
+// (review) UNISWAP V4 SIGN CONVENTION — verified on real Base txs (test/fixtures/v4-swaps.json):
+// Swap.amount0/amount1 are deltas FOR THE SWAPPER (not the pool, unlike V3).
+//   amount > 0 -> the trader RECEIVED that currency (bought it)
+//   amount < 0 -> the trader PAID that currency in (sold it)
+// BRAWL is currency0, so amount0 > 0 = trader BOUGHT BRAWL. (The original code had this
+// backwards, so buyVol/sellVol and whale direction — NN F[33]/F[36] — were inverted.)
 // Returns {buyVol, sellVol, whaleNetBrawl} in BRAWL units, or null on failure.
+// (Wren 2026-10-08: spike-pass fix) Attribute a price spike: was the dominant buy
+// volume in the last ~2 min from the owner/fleet? Returns { ownerDriven, detail }.
+// Fails OPEN (ownerDriven=false) on any RPC error — an unattributable spike is
+// treated as an outside big buyer, which is the original intent of the pass.
+async function isOwnerDrivenSpike(publicClient, log) {
+  const ownerSet = new Set(
+    [OWNER_EOA, ORBX_WALLET, FLEET_SW, ...BURNERS].map((a) => a.toLowerCase())
+  );
+  try {
+    const curBlock = await publicClient.getBlockNumber();
+    const fromBlock = curBlock > BigInt(SPIKE_ATTRIB_BLOCKS) ? curBlock - BigInt(SPIKE_ATTRIB_BLOCKS) : 0n;
+    const logs = await raceTimeout(
+      publicClient.getLogs({ address: POOLMANAGER, fromBlock, toBlock: 'latest' }),
+      15000, 'spike attribution getLogs timeout');
+    const pid = poolId().toLowerCase();
+    let swaps = [];
+    for (const l of logs) {
+      if (!l.topics || l.topics[0]?.toLowerCase() !== SWAP_TOPIC0) continue;
+      if (l.topics[1]?.toLowerCase() !== pid) continue; // not our pool
+      const dh = l.data.startsWith('0x') ? l.data.slice(2) : l.data;
+      if (dh.length < 384) continue;
+      let amount0 = BigInt('0x' + dh.slice(0, 64));
+      if (amount0 >= 2n ** 255n) amount0 -= 2n ** 256n; // int128 sign-extended
+      // (review) V4 deltas are the TRADER's: amount0 > 0 = trader received BRAWL = a BUY.
+      // This read `brawl < 0` (V3 convention) and so attributed SELLS, missing the
+      // owner's own buys — the fleet would have sold into Anthony's pump anyway.
+      const brawl = Number(amount0) / 1e18;
+      if (brawl > 0) swaps.push({ tx: l.transactionHash, buyVol: brawl });
+    }
+    // (review) keep the MOST RECENT buys (the ones that made the spike); the old loop
+    // broke after the first 12 in the window, i.e. the oldest.
+    swaps = swaps.slice(-SPIKE_ATTRIB_MAX_TX);
+    if (!swaps.length) return { ownerDriven: false, detail: 'no buys in window' };
+    let ownerBuy = 0, totalBuy = 0;
+    for (const s of swaps) {
+      totalBuy += s.buyVol;
+      try {
+        const tx = await raceTimeout(
+          publicClient.getTransaction({ hash: s.tx }), 10000, 'spike attribution tx timeout');
+        const from = (tx && tx.from ? String(tx.from) : '').toLowerCase();
+        if (from && ownerSet.has(from)) ownerBuy += s.buyVol;
+      } catch (e) { /* one bad lookup doesn't kill attribution */ }
+    }
+    const frac = totalBuy > 0 ? ownerBuy / totalBuy : 0;
+    log(`spike attribution: owner/fleet bought ${ownerBuy.toFixed(1)} of ${totalBuy.toFixed(1)} BRAWL in window (${(frac * 100).toFixed(0)}%)`);
+    return { ownerDriven: frac >= 0.5, detail: `${(frac * 100).toFixed(0)}% owner/fleet` };
+  } catch (e) {
+    log(`spike attribution failed (${String(e.message || e).slice(0, 80)}) — treating as outside buyer (fail open)`);
+    return { ownerDriven: false, detail: 'attribution failed' };
+  }
+}
+
 async function fetchSwapFlow(publicClient, log) {
   try {
     const curBlock = await publicClient.getBlockNumber();
@@ -686,9 +751,9 @@ async function fetchSwapFlow(publicClient, log) {
       // int128 sign-extended to 256 bits in the ABI encoding
       let amount0 = words[0];
       if (amount0 >= 2n ** 255n) amount0 -= 2n ** 256n;
-      const brawl = Number(amount0) / 1e18; // signed BRAWL for the pool
-      if (brawl < 0) buyVol += -brawl; else sellVol += brawl;
-      if (Math.abs(brawl) > WHALE_BRAWL) whaleNet += -brawl; // + = whales net buying
+      const brawl = Number(amount0) / 1e18; // signed BRAWL for the TRADER (+ = bought)
+      if (brawl > 0) buyVol += brawl; else sellVol += -brawl;
+      if (Math.abs(brawl) > WHALE_BRAWL) whaleNet += brawl; // + = whales net buying
       n++;
     }
     log(`swap flow: ${n} swaps/10m | buy ${buyVol.toFixed(1)} / sell ${sellVol.toFixed(1)} BRAWL | whale net ${whaleNet >= 0 ? '+' : ''}${whaleNet.toFixed(1)}`);
@@ -1796,7 +1861,8 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
 // formula (profitUsd * 100 * (1+ROI) / (1+hh)) scaled with position SIZE, so
 // Q-values reflected capital allocation, not strategy quality. A 50% ROI in 1h
 // now scores ~3333 whether the position was $0.10 or $10. Q-values are comparable
-// across the 16-wallet heterogeneous fleet. QGRID_VER bumped to 5 for clean reset.
+// across the 16-wallet heterogeneous fleet. (Historical note: this comment once said
+// "QGRID_VER bumped to 5" — the live const is 10; see the QGRID_VER declaration.)
 // #7 HEARTBEAT helper: base points per trade, scaled by market flow volume.
 // ctx.volumeStats = { buyVol, sellVol } in USD (from swap flow). More flow = higher multiplier.
 // Rewards keeping the market alive; profit remains the main driver.
@@ -2060,6 +2126,20 @@ async function executeSell(ctx, i, position, reason, log, fraction = 1.0) {
   if (profitEst < minProfit && reason !== 'stop-loss' && reason !== 'max-hold') {
     log(`SKIP sell (${reason}): profit $${profitEst.toFixed(4)} < 1.5x gas ($${minProfit.toFixed(4)})`);
     return null;
+  }
+  // (Wren 2026-10-08: spike-pass fix) 'spike' exits must ALSO clear the wallet's
+  // own margin target — the old spike pass let any holding wallet sell at just
+  // the 1.5x-gas bar, which is how 16 wallets synchronized into one tick.
+  if (reason === 'spike') {
+    // (review) margin on the cost of the fraction actually being sold (costUsd is
+    // fraction-scaled). With the full buyCostUsd, a whale-capped partial sell needed
+    // the WHOLE position's margin from a fraction of the position.
+    const marginUsd = costUsd * (Number(position.marginAtOpen) || 0) / 100;
+    const ownTarget = Math.max(minProfit, marginUsd);
+    if (profitEst < ownTarget) {
+      log(`SKIP sell (spike): profit $${profitEst.toFixed(4)} < own target $${ownTarget.toFixed(4)} (max(1.5x gas, margin))`);
+      return null;
+    }
   }
 
   await ensureSellApproval(publicClient, account, target, sellWei, env, log, dryRun, ctx.signal);
@@ -3034,23 +3114,44 @@ async function runTick(env, log) {
   }
 
   // 3b) Spike listener (Anthony 2026-10-07 13:41 EDT): +10% in ONE tick (likely Anthony
-  // or a big buyer) -> immediate exit pass. Every holding wallet attempts its spike sell
-  // in THIS invocation, before normal per-wallet logic. Cooldowns don't block profit.
-  // WREN: this pass tries to sell EVERY holding wallet in the same tick (each one only
-  // needs the 1.5x-gas bar, not its own margin target) — the same synchronized
-  // multi-wallet exit you banned for stop-losses. And if the spike really is Anthony
-  // buying, the fleet is selling straight into its own owner: same beneficial owner on
-  // both sides. Prefer: only wallets whose OWN target is met, staggered across ticks.
+  // or a big buyer) -> accelerated exit evaluation.
+  // (Wren 2026-10-08: spike-pass fix) The old pass sold EVERY holding wallet in the
+  // same tick at just the 1.5x-gas bar — the synchronized multi-wallet exit Anthony
+  // banned for stop-losses. Now: (1) if the spike's dominant buy volume is the
+  // owner/fleet, HOLD — never sell into our own buy; (2) only wallets whose OWN
+  // target is met may exit (enforced in executeSell for reason 'spike'); (3) at most
+  // SPIKE_MAX_EXITS_PER_TICK exits per tick, highest conviction first — the rest
+  // are handled by the normal holding branch on this or later ticks. No KV queue:
+  // the holding branch already evaluates every wallet's own target every tick.
   if (prev && moveBps >= SPIKE_PCT * 100) {
-    log(`!!! SPIKE +${(moveBps / 100).toFixed(1)}% since last tick — immediate exit pass on all wallets`);
-    for (let i = 0; i < BURNERS.length; i++) {
-      try {
-        const position = await kvGet(env, `wallet:${i}:position`, null);
-        if (!position) continue;
-        const r = await executeSell({ ...ctx, log }, i, position, 'spike', log)
-          .catch((e) => { log(`[w${i}] spike sell error: ${e.message}`); return null; });
-        if (r) log(`[w${i}] spike exit executed`);
-      } catch (e) { log(`[w${i}] spike pass error: ${e.message}`); }
+    log(`!!! SPIKE +${(moveBps / 100).toFixed(1)}% since last tick — accelerated exit evaluation`);
+    const { ownerDriven, detail } = await isOwnerDrivenSpike(publicClient, log);
+    if (ownerDriven) {
+      log(`SPIKE HOLD: dominant buy volume is owner/fleet (${detail}) — will not sell into our own buy`);
+    } else {
+      // Rank holding wallets by rough conviction (estimated unrealized profit) so
+      // the limited per-tick exits go to the strongest targets first.
+      const cands = [];
+      for (let i = 0; i < BURNERS.length; i++) {
+        try {
+          const position = await kvGet(env, `wallet:${i}:position`, null);
+          if (!position || !position.amountWei) continue;
+          const estValUsd = (Number(BigInt(position.amountWei)) / 1e18) * (priceWeth || 0) * (ethUsd || 0);
+          const estProfit = estValUsd - (position.buyCostUsd || 0);
+          cands.push({ i, position, estProfit });
+        } catch (e) { log(`[w${i}] spike rank error: ${e.message}`); }
+      }
+      cands.sort((a, b) => b.estProfit - a.estProfit);
+      const batch = cands.slice(0, SPIKE_MAX_EXITS_PER_TICK);
+      log(`spike exits: ${cands.length} holding, evaluating top ${batch.length} this tick (rest via normal holding branch)`);
+      for (const { i, position } of batch) {
+        try {
+          const r = await executeSell({ ...ctx, log }, i, position, 'spike', log)
+            .catch((e) => { log(`[w${i}] spike sell error: ${e.message}`); return null; });
+          if (r) log(`[w${i}] spike exit executed`);
+          else log(`[w${i}] spike exit skipped (below own target or 1.5x bar)`);
+        } catch (e) { log(`[w${i}] spike pass error: ${e.message}`); }
+      }
     }
   }
 
@@ -3237,7 +3338,8 @@ export default {
 export { executeSell, BURNERS, BRAWL };
 // Pure helpers exported for unit tests (test/*.test.mjs). No side effects.
 // Internals for the fork tournament's simulated outsiders (same execution path as babies).
-export const __internal = { getQuote, resolveSellPermits, sendRawTx, waitReceipt, ensureSellApproval, ERC20_ABI };
+export const __internal = { getQuote, resolveSellPermits, sendRawTx, waitReceipt, ensureSellApproval, ERC20_ABI,
+  poolId, isOwnerDrivenSpike, OWNER_EOA, ORBX_WALLET, FLEET_SW, SPIKE_MAX_EXITS_PER_TICK };
 export const __test = {
   closeReward, rollLow24, bottomSignal, buildFeatures, blankQTable, parseCombo, comboKey,
   selectCombo, computePriceVelAnn, NN_IN, LOW_WINDOW_MS,

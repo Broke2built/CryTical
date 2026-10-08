@@ -59,7 +59,7 @@ function log(line) {
 function runTick() {
   return new Promise((done) => {
     const t0 = Date.now();
-    const child = spawn(CMD[0], CMD.slice(1), { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    const child = spawn(CMD[0], CMD.slice(1), { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, LOOP_CHILD: '1' } });
     let out = '';
     child.stdout.on('data', (d) => { out += d; });
     child.stderr.on('data', (d) => { out += d; });

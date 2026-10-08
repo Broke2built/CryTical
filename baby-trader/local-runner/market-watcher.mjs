@@ -82,7 +82,11 @@ export function coinPriceSq(sqrtPriceX96, coin) {
 }
 
 const toSigned128 = (w) => (w >= (1n << 255n) ? w - (1n << 256n) : w);
-// Decode a V4 Swap log for a coin. amounts are deltas FOR THE POOL: negative = paid out.
+// (review) UNISWAP V4 SIGN CONVENTION — verified on real Base txs (test/fixtures/v4-swaps.json):
+// Swap.amount0/amount1 are deltas FOR THE SWAPPER (not the pool, unlike V3).
+//   amount > 0 -> the trader RECEIVED that currency (bought it)
+//   amount < 0 -> the trader PAID that currency in (sold it)
+// (My first version of this said "deltas for the pool" — wrong; buy/sell were swapped.)
 export function decodeSwap(log, coin) {
   const d = log.data.startsWith('0x') ? log.data.slice(2) : log.data;
   const a0 = toSigned128(BigInt('0x' + d.slice(0, 64)));
@@ -92,7 +96,7 @@ export function decodeSwap(log, coin) {
   const wethDelta = t0 ? a1 : a0;
   const abs = (x) => (x < 0n ? -x : x);
   return {
-    traderBought: coinDelta < 0n, // pool paid coin out -> trader bought
+    traderBought: coinDelta > 0n, // trader received the coin -> bought
     coinUnits: Number(abs(coinDelta)) / 1e18,
     weth: Number(abs(wethDelta)) / 1e18,
   };
