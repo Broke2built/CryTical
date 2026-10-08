@@ -21,7 +21,7 @@ crons = ["*/5 * * * *"]
 
 [vars]
 DRY_RUN = "true"                 # flip to "false" only after a clean dry day (npm run status -- --remote)
-TICK_INTERVAL_MS = "60000"
+TICK_INTERVAL_MS = "60000"       # must stay > 45000 (the bot's own 45 s tick lock would skip every other tick)
 RPC_URLS = "https://base-rpc.publicnode.com,https://mainnet.base.org"   # TODO: put a keyed RPC first
 
 # Secrets (never in this file):  npx wrangler secret put <NAME>

@@ -1,4 +1,21 @@
-# Cloudflare audit + running locally
+# Cloudflare audit, Durable Object mode, local fallback
+
+## 0. Where this ended up (read this first)
+
+Operator constraint: **RPC traffic must stay off Wren's PC** (its egress proxy wedges often). So:
+
+- **Trading runs on Cloudflare, inside one Durable Object** (`src/durable.js`, deploy entry `cloudflare.js`, config `wrangler.toml.example`). The audit's two money risks are gone by construction:
+  - §2.1 stale reads: Durable Object storage is strongly consistent.
+  - §2.1 overlapping ticks: a DO's alarm never runs concurrently with itself, plus an in-memory running flag for manual ticks.
+  - The cron is now only a watchdog that re-arms the alarm.
+- **Her PC makes one HTTPS call to check or control the bot:** `npm run status -- --remote`, `npm run ops -- pause|resume|ensure|tick|log|backup|restore`. The onchain balance check runs from Cloudflare.
+- **Proof:**
+  - `test/durable.test.mjs` replays the golden master on DO storage: identical transactions and state.
+  - `npm run test:workerd` runs the real worker in Cloudflare's runtime: alarm loop, pause/resume, doctor and ops.
+- **New finding from that runtime test:** Cloudflare's runtime refuses to start a main module with non-handler named exports. The original `export { executeSell, BURNERS, BRAWL }` hits this (`Incorrect type for map entry 'BRAWL'`). Deploy `cloudflare.js`, not `worker.js`.
+- **Keep `TICK_INTERVAL_MS` > 45 000.** The bot's own `meta:tickLock` skips any tick that starts less than 45 s after the last one.
+- **The local runner below** is now the fallback, for when Cloudflare is unavailable.
+
 
 Audit of `worker.js` (2026-10-08) for Cloudflare Workers limits. **Every number below was measured.** I ran real `worker.js` ticks against `test/helpers/fake-chain.mjs` and counted every subrequest, KV call and CPU millisecond. `test/local-runner.test.mjs` re-checks the worst case on every `npm test`.
 

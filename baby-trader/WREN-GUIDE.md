@@ -1,5 +1,14 @@
 # Baby Trader: Review, Fixes and Pro Tips for Wren
 
+> **Start here, in this order:** `RUN-IT.md` (operate it) → `CODEBASE.md` (change it safely) → this guide (why) → `CLOUDFLARE-NOTES.md` (where it runs) → `REFERENCES.md` (sources).
+>
+> **Latest round (after your spike-pass fix):**
+> - Your fix is merged and reviewed. **One real bug fixed in it: Uniswap V4 swap amounts are the TRADER's deltas, not the pool's**, so the attribution was counting sells as buys. That's now proven on real Base transactions (`test/fixtures/v4-swaps.json`). The same inversion was fixed in `fetchSwapFlow` (NN F[33]/F[36]) and in `market-watcher`.
+> - The owner-driven hold now also blocks per-wallet profit-taking in the same tick.
+> - `worker.js` is split into `src/` modules, with behavior locked by a golden-master test.
+> - The bot now runs in a Cloudflare Durable Object.
+> - One-command status and controls, with no RPC from your PC.
+
 Written 2026-10-08 after a full read of `worker.js`, the runners, the sims and the live Q-tables.
 Everything below was **fixed in code and tested** unless it says otherwise.
 In the code, search for `(review)` and `NOTES FOR WREN` to find every change.

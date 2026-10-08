@@ -10,3 +10,8 @@ sim/sim-agg.json
 sim/trained-brains.json
 sim/tournament-brains.json
 local-runner/fork-kv.json
+.wrangler/
+wrangler.toml
+backup-*.json
+local-runner/heartbeat.json
+local-runner/tick.log*

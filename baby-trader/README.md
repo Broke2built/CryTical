@@ -1,14 +1,19 @@
 # baby-trader
 
-16 autonomous trading wallets ("babies") for Zora coins on Base. **Start with `WREN-GUIDE.md`.**
+16 autonomous trading wallets ("babies") for Zora coins on Base.
+
+| I want to… | Read |
+|---|---|
+| run it, check on it, fix it | **RUN-IT.md** |
+| change the code without breaking it | **CODEBASE.md** |
+| understand why it's built this way | WREN-GUIDE.md, CLOUDFLARE-NOTES.md |
+| find the source for a claim | REFERENCES.md |
 
 ```
 npm install
-npm test             # 20 tests, no network, no money
-npm run fetch-real   # pull real Base swap flow (accumulates in sim/data/)
-npm run train        # parallel training on synthetic markets learned from real flow + out-of-sample exam
-npm run tournament   # babies fight on a simulated thin AMM, survival of the fittest
-npm run fork         # babies fight on a private Base fork with the real worker.js (needs foundry's anvil)
+npm test                       # 38 tests, no network, no money (includes the behavior lock)
+npm run test:workerd           # the real bot inside Cloudflare's runtime, offline
+npm run status -- --remote     # is the live bot healthy? (1 https call, no RPC)
+npm run ops -- pause           # kill switch   (resume | ensure | tick | log | backup | restore)
+npm run tournament / train     # simulations (no network)
 ```
-
-Live (local PC, recommended): `KEYS_FILE=... KV_FILE=... DRY_RUN=true node local-runner/loop.mjs` — one non-overlapping tick per minute. See `CLOUDFLARE-NOTES.md` for why not Cloudflare and how to run it under pm2/systemd.
