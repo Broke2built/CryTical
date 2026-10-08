@@ -164,11 +164,20 @@ export function runTournament(opts = {}) {
           const pnl = got - b.pos.cost - P.gasEth;
           const reward = W.closeReward(pnl / b.pos.cost, held / 60);
           b.q[b.pos.key] += P.alpha * (reward - b.q[b.pos.key]);
+          b.best = null;
           b.trades++; if (pnl > 0) b.wins++;
           b.pos = null; b.lastTrade = t;
           continue;
         }
-        const key = W.selectCombo(b.q, b.rngState, noop, P.epsilon);
+        // Same epsilon-greedy as worker.selectCombo, but the argmax is cached until the
+        // next Q-update (10x faster; identical choices except tie re-rolls).
+        if (!b.keys) b.keys = Object.keys(b.q).filter((k) => Number.isFinite(W.parseCombo(k).dump));
+        let key;
+        if (r() < P.epsilon) key = b.keys[Math.floor(r() * b.keys.length)];
+        else {
+          if (!b.best) { let bv = -Infinity, tied = []; for (const k of b.keys) { const v = b.q[k]; if (v > bv) { bv = v; tied = [k]; } else if (v === bv) tied.push(k); } b.best = tied[Math.floor(r() * tied.length)]; }
+          key = b.best;
+        }
         const c = W.parseCombo(key);
         if (t - b.lastTrade < c.cd) continue;
         const crash = tickDrop >= c.dump || twoDrop >= c.dump;
@@ -198,7 +207,7 @@ export function runTournament(opts = {}) {
     for (let k = 0; k < P.cull; k++) {
       const parent = ranked[k], child = ranked[ranked.length - 1 - k];
       child.q = Object.fromEntries(Object.entries(parent.q).map(([key, v]) => [key, v * (1 + (r() * 2 - 1) * P.mutation)]));
-      child.lineage = `${parent.lineage}>g${g}`;
+      child.lineage = `${parent.lineage}>g${g}`; child.best = null;
     }
   }
   return { params: P, history, brains: Object.fromEntries(babies.map((b) => [`baby_${b.id}`, { lineage: b.lineage, qtable: b.q }])) };
