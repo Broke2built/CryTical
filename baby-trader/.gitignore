@@ -7,3 +7,6 @@ keys*.json
 sim/replay-data.json
 sim/sim-qtables.json
 sim/sim-agg.json
+sim/trained-brains.json
+sim/tournament-brains.json
+local-runner/fork-kv.json

@@ -5,6 +5,8 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "tournament": "node sim/tournament.mjs --scenario mixed --generations 20",
+    "fetch-real": "node sim/fetch-real.mjs",
+    "train": "node sim/train.mjs --epochs 20 --gens 50",
     "fork": "node local-runner/fork-tournament.mjs --ticks 90 --outsiders 4 --activity 0.5",
     "check": "node --check worker.js && for f in local-runner/*.mjs sim/*.mjs; do node --check $f || exit 1; done"
   },

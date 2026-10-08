@@ -37,11 +37,12 @@
 // ===========================================================================
 //
 // Usage:
-//   node sim/tournament.mjs [--scenario launch|noise|dead|mixed] [--generations 20]
+//   node sim/tournament.mjs [--scenario real|launch|noise|dead|mixed] [--generations 20]
 //        [--ticks 600] [--seed 1] [--grid live|tight] [--out sim/tournament-brains.json] [--quiet]
 
 import { writeFileSync } from 'node:fs';
 import { __test as W } from '../worker.js';
+import { makeFlow, perturb, sizeForImpact, loadProfiles } from './synth.mjs';
 
 const args = process.argv.slice(2);
 const arg = (n, d) => { const i = args.indexOf(n); return i >= 0 && args[i + 1] ? args[i + 1] : d; };
@@ -118,103 +119,174 @@ export function gridQTable(name) {
 
 function stopFor(i) { const r = rng(1337 + i * 7919 + 13); return { pct: 14 + r() * 12, holdTicks: Math.round((1.5 + r() * 3) * 60) }; }
 
+// ---------------------------------------------------------------------------------
+// FAST ENGINE. Same rules as before, but every hot-path value is a number in a typed
+// array: combo thresholds are pre-parsed once, Q is a Float64Array per baby, the 1h
+// high is a monotonic deque (O(1)), TWAP is a rolling sum, and the bandit argmax is
+// cached until that baby's next Q-update. Nothing allocates per tick.
+// WREN: if you add a rule, keep it allocation-free in the tick loop or you lose the
+// "years per minute" speed that makes the tournament worth running.
+// ---------------------------------------------------------------------------------
+export function comboSpace(gridName = 'live') {
+  const keys = Object.keys(gridQTable(gridName)).filter((k) => Number.isFinite(W.parseCombo(k).dump));
+  const n = keys.length;
+  const dump = new Float64Array(n), value = new Float64Array(n), margin = new Float64Array(n),
+    size = new Float64Array(n), cd = new Float64Array(n);
+  keys.forEach((k, i) => { const c = W.parseCombo(k); dump[i] = c.dump; value[i] = c.value; margin[i] = c.margin; size[i] = c.size; cd[i] = c.cd; });
+  return { keys, n, dump, value, margin, size, cd };
+}
+// Exported brains use the live table format (432 grid cells + the never-selected baseline key).
+const qToObject = (cs, q) => ({ ...Object.fromEntries(cs.keys.map((k, i) => [k, q[i]])), baseline_unattributed: 0 });
+const qFromObject = (cs, o) => Float64Array.from(cs.keys, (k) => o?.[k] ?? 0);
+
 export function runTournament(opts = {}) {
   const P = { ...DEFAULTS, ...opts };
   const r = rng(P.seed ?? 1);
-  const babies = Array.from({ length: P.babies }, (_, i) => ({
-    id: i, q: gridQTable(P.grid || 'live'), rngState: { s: (1337 + i * 7919) >>> 0 }, lineage: `b${i}`, stop: stopFor(i),
+  const cs = opts.combos || comboSpace(P.grid || 'live');
+  const NB = P.babies;
+  const babies = Array.from({ length: NB }, (_, i) => ({
+    id: i, q: opts.initialBrains?.[i] ? qFromObject(cs, opts.initialBrains[i].qtable) : new Float64Array(cs.n),
+    lineage: opts.initialBrains?.[i]?.lineage || `b${i}`, stop: stopFor(i), best: -1,
   }));
   const history = [];
-  const noop = () => {};
+  const order = new Int32Array(NB).map((_, i) => i);
+  const WIN = 60, TW = 10, MOM = 15;
+  const ring = new Float64Array(WIN + 1);        // last prices (for twap/momentum/prev)
+  const dqP = new Float64Array(WIN + 2), dqT = new Int32Array(WIN + 2); // monotonic deque for 1h high
   for (let g = 0; g < P.generations; g++) {
     const pool = new Pool(P.poolWeth, P.poolCoin, P.fee);
-    const ext = { coin: P.poolCoin * 0.02, wethIn: 0, wethOut: 0, trades: 0 }; // outsiders start with a bag
-    const hist = [pool.price()];
-    let low = { p: pool.price(), t: 0 };
-    for (const b of babies) Object.assign(b, { eth: P.bankrollEth, pos: null, lastTrade: -1e9, trades: 0, wins: 0, gas: 0 });
-    const order = babies.slice();
+    const ext = { coin: P.poolCoin * 0.02, wethIn: 0, wethOut: 0, trades: 0 };
+    // scenario 'real': outsiders follow order flow learned from a real Base pool, a
+    // different (jittered) pool every generation. See sim/synth.mjs.
+    const flow = P.scenario === 'real' && P.profiles?.length
+      ? makeFlow(perturb(P.profiles[Math.floor(r() * P.profiles.length)], r, P.perturb ?? 0.5), r) : null;
+    const p0 = pool.price();
+    ring.fill(p0);
+    let head = 0, dqH = 0, dqTl = 0, twSum = p0 * TW, lowP = p0, lowT = 0;
+    const histView = { length: 0, at: (back) => ring[(head - back + 1 + 2 * (WIN + 1)) % (WIN + 1)] };
+    for (const b of babies) { b.eth = P.bankrollEth; b.pos = false; b.coin = 0; b.cost = 0; b.key = -1; b.t0 = 0; b.lastTrade = -1e9; b.trades = 0; b.wins = 0; b.gas = 0; }
     for (let t = 1; t <= P.ticks; t++) {
-      externalFlow(P.scenario, t, P.ticks, pool, hist, r, ext, P);
+      histView.length = t;
+      if (flow) {
+        const imps = flow.step();
+        for (let k = 0; k < imps.length; k++) {
+          const { side, amount } = sizeForImpact(pool, Math.max(-1, Math.min(1, imps[k])));
+          if (!(amount > 0)) continue;
+          if (side === 'buy') { ext.coin += pool.buy(amount); ext.wethIn += amount; }
+          else { ext.coin -= amount; ext.wethOut += pool.sell(amount); } // outsiders = the whole market; may go net short
+          ext.trades++;
+        }
+      } else externalFlowFast(P.scenario, t, P.ticks, pool, histView, r, ext);
       const px = pool.price();
-      hist.push(px);
-      if (px < low.p || t - low.t > 1440) low = { p: px, t };
-      const prev = hist[hist.length - 2], prev2 = hist[hist.length - 3] ?? prev;
-      const high1h = Math.max(...hist.slice(-60));
+      const prev = ring[head], prev2 = ring[(head + WIN) % (WIN + 1)];
+      const out = ring[(head + 1 + (WIN + 1) - TW) % (WIN + 1)];
+      head = (head + 1) % (WIN + 1); ring[head] = px;
+      twSum += px - out;
+      while (dqTl > dqH && dqP[(dqTl - 1) % (WIN + 2)] <= px) dqTl--;
+      dqP[dqTl % (WIN + 2)] = px; dqT[dqTl % (WIN + 2)] = t; dqTl++;
+      while (dqT[dqH % (WIN + 2)] <= t - WIN) dqH++;
+      const high1h = dqP[dqH % (WIN + 2)];
+      if (px < lowP || t - lowT > 1440) { lowP = px; lowT = t; }
       const tickDrop = prev > px ? (prev - px) / prev * 100 : 0;
       const twoDrop = prev2 > px ? (prev2 - px) / prev2 * 100 : 0;
       const dip = (high1h - px) / high1h * 100;
-      const aboveLow = (px - low.p) / low.p * 100;
-      const twap = hist.slice(-10).reduce((a, b) => a + b, 0) / Math.min(10, hist.length);
-      for (let k = order.length - 1; k > 0; k--) { const j = Math.floor(r() * (k + 1)); [order[k], order[j]] = [order[j], order[k]]; }
-      for (const b of order) {
+      const aboveLow = (px - lowP) / lowP * 100;
+      const belowTwap = px <= (twSum / TW) * 1.02;
+      const p5 = ring[(head + (WIN + 1) - 5) % (WIN + 1)];
+      const mom5 = (px / p5 - 1) * 100;
+      const bottom = aboveLow >= P.bottomMinBouncePct && aboveLow <= P.nearLowPct && (t - lowT) >= P.bottomMinLowAgeTicks;
+      for (let k = NB - 1; k > 0; k--) { const j = Math.floor(r() * (k + 1)); const x = order[k]; order[k] = order[j]; order[j] = x; }
+      // ANTI-STALEMATE experiment (P.onePerTick): at most ONE baby may open a position per
+      // tick on this coin (random order = rotating turn). Without it, all 16 read the same
+      // price, fire the same signal in the same tick, buy together and freeze together.
+      let boughtThisTick = false;
+      for (let oi = 0; oi < NB; oi++) {
+        const b = babies[order[oi]];
         if (b.pos) {
-          const value = pool.quoteSell(b.pos.coin);          // what selling ALL now would really fetch (impact included)
-          const profit = value - b.pos.cost - P.gasEth;       // cost already includes buy gas; subtract sell gas
-          const roiPct = profit / b.pos.cost * 100;
-          const pc = W.parseCombo(b.pos.key);
-          const target = Math.max(P.sellProfitMult * 2 * P.gasEth, b.pos.cost * pc.margin / 100);
-          const held = t - b.pos.t;
-          let reason = null;
-          if (profit >= target) reason = 'target';
-          else if (roiPct <= -P.hardStopPct) reason = 'hard-stop';
-          else if (roiPct <= -b.stop.pct && held >= b.stop.holdTicks) reason = 'stop-loss';
-          if (!reason || b.eth < P.gasEth) continue;
-          const got = pool.sell(b.pos.coin);
+          const profit = pool.quoteSell(b.coin) - b.cost - P.gasEth;
+          const roiPct = profit / b.cost * 100;
+          const target = Math.max(P.sellProfitMult * 2 * P.gasEth, b.cost * cs.margin[b.key] / 100);
+          const held = t - b.t0;
+          if (!(profit >= target || roiPct <= -P.hardStopPct || (roiPct <= -b.stop.pct && held >= b.stop.holdTicks)) || b.eth < P.gasEth) continue;
+          const got = pool.sell(b.coin);
           b.eth += got - P.gasEth; b.gas += P.gasEth;
-          const pnl = got - b.pos.cost - P.gasEth;
-          const reward = W.closeReward(pnl / b.pos.cost, held / 60);
-          b.q[b.pos.key] += P.alpha * (reward - b.q[b.pos.key]);
-          b.best = null;
-          b.trades++; if (pnl > 0) b.wins++;
-          b.pos = null; b.lastTrade = t;
+          const pnl = got - b.cost - P.gasEth;
+          const reward = W.closeReward(pnl / b.cost, held / 60);
+          b.q[b.key] += P.alpha * (reward - b.q[b.key]);
+          b.best = -1; b.trades++; if (pnl > 0) b.wins++;
+          b.pos = false; b.lastTrade = t;
           continue;
         }
-        // Same epsilon-greedy as worker.selectCombo, but the argmax is cached until the
-        // next Q-update (10x faster; identical choices except tie re-rolls).
-        if (!b.keys) b.keys = Object.keys(b.q).filter((k) => Number.isFinite(W.parseCombo(k).dump));
         let key;
-        if (r() < P.epsilon) key = b.keys[Math.floor(r() * b.keys.length)];
+        if (r() < P.epsilon) key = Math.floor(r() * cs.n);
         else {
-          if (!b.best) { let bv = -Infinity, tied = []; for (const k of b.keys) { const v = b.q[k]; if (v > bv) { bv = v; tied = [k]; } else if (v === bv) tied.push(k); } b.best = tied[Math.floor(r() * tied.length)]; }
+          if (b.best < 0) { // argmax with random tie-break (reservoir), cached until next update
+            let bv = -Infinity, cnt = 0;
+            for (let i = 0; i < cs.n; i++) { const v = b.q[i]; if (v > bv) { bv = v; b.best = i; cnt = 1; } else if (v === bv && r() * ++cnt < 1) b.best = i; }
+          }
           key = b.best;
         }
-        const c = W.parseCombo(key);
-        if (t - b.lastTrade < c.cd) continue;
-        const crash = tickDrop >= c.dump || twoDrop >= c.dump;
-        const value = dip >= c.value && tickDrop < 10 && px <= twap * 1.02;
-        const bottom = aboveLow >= P.bottomMinBouncePct && aboveLow <= P.nearLowPct && (t - low.t) >= P.bottomMinLowAgeTicks;
-        if (!crash && !value && !bottom) continue;
-        const spend = (b.eth - 2 * P.gasEth) * c.size / 100; // keep gas for this buy AND the exit
-        if (spend <= 10 * P.gasEth) continue;                 // position too small to ever clear gas
+        if (t - b.lastTrade < cs.cd[key]) continue;
+        if (P.onePerTick && boughtThisTick) continue;
+        const d = cs.dump[key];
+        // P.strategy: 'dip' (live worker.js logic), 'momentum' (buy WITH a rise of >= dump%
+        // over 5 ticks — real Base order flow persists ~70% of the time), or 'both'.
+        const dipSig = tickDrop >= d || twoDrop >= d || (dip >= cs.value[key] && tickDrop < 10 && belowTwap) || bottom;
+        const momSig = mom5 >= d && px < high1h * 1.0001; // rising and at/near the 1h high
+        const strat = P.strategy || 'dip';
+        if (!(strat === 'dip' ? dipSig : strat === 'momentum' ? momSig : dipSig || momSig)) continue;
+        const spend = (b.eth - 2 * P.gasEth) * cs.size[key] / 100;
+        if (spend <= 10 * P.gasEth) continue;
         b.eth -= spend + P.gasEth; b.gas += P.gasEth;
-        b.pos = { coin: pool.buy(spend), cost: spend + P.gasEth, key, t };
+        b.coin = pool.buy(spend); b.cost = spend + P.gasEth; b.key = key; b.t0 = t; b.pos = true; boughtThisTick = true;
       }
     }
-    // Mark open positions to what they'd really fetch (impact included), sequentially.
     const finalPx = pool.price();
-    const openAtEnd = babies.filter((b) => b.pos).length;
-    for (const b of babies) { if (b.pos) { b.eth += pool.sell(b.pos.coin) - P.gasEth; b.gas += P.gasEth; b.pos = null; } b.pnl = b.eth - P.bankrollEth; }
-    const extPnl = ext.wethOut - ext.wethIn + ext.coin * pool.price() - P.poolCoin * 0.02 * hist[0];
+    let openAtEnd = 0;
+    for (const b of babies) { if (b.pos) { openAtEnd++; b.eth += pool.sell(b.coin) - P.gasEth; b.gas += P.gasEth; b.pos = false; } b.pnl = b.eth - P.bankrollEth; }
+    const extPnl = ext.wethOut - ext.wethIn + ext.coin * pool.price() - P.poolCoin * 0.02 * p0;
     const ranked = babies.slice().sort((a, b) => b.pnl - a.pnl);
-    const fleetPnl = babies.reduce((a, b) => a + b.pnl, 0);
-    history.push({
-      gen: g, finalPx, startPx: hist[0],
-      fleet: { netPnl: fleetPnl, gas: babies.reduce((a, b) => a + b.gas, 0), trades: babies.reduce((a, b) => a + b.trades, 0) },
+    let fleetPnl = 0, gas = 0, trades = 0;
+    for (const b of babies) { fleetPnl += b.pnl; gas += b.gas; trades += b.trades; }
+    if (!P.lean || g === P.generations - 1) history.push({
+      gen: g, finalPx, startPx: p0, fleet: { netPnl: fleetPnl, gas, trades },
       external: { netPnl: extPnl, trades: ext.trades }, poolFees: pool.feesWeth, openAtEnd,
       leaderboard: ranked.map((b) => ({ id: b.id, lineage: b.lineage, pnl: b.pnl, trades: b.trades, winRate: b.trades ? b.wins / b.trades : 0 })),
     });
+    else history.push({ gen: g, fleet: { netPnl: fleetPnl, gas, trades }, external: { netPnl: extPnl, trades: ext.trades } });
     // Survival of the fittest: bottom `cull` replaced by mutated copies of the top `cull`.
     for (let k = 0; k < P.cull; k++) {
-      const parent = ranked[k], child = ranked[ranked.length - 1 - k];
-      child.q = Object.fromEntries(Object.entries(parent.q).map(([key, v]) => [key, v * (1 + (r() * 2 - 1) * P.mutation)]));
-      child.lineage = `${parent.lineage}>g${g}`; child.best = null;
+      const parent = ranked[k], child = ranked[NB - 1 - k];
+      for (let i = 0; i < cs.n; i++) child.q[i] = parent.q[i] * (1 + (r() * 2 - 1) * P.mutation);
+      child.lineage = parent.lineage.length > 200 ? parent.lineage.slice(0, 12) + '…' : `${parent.lineage}>g${g}`;
+      child.best = -1;
     }
   }
-  return { params: P, history, brains: Object.fromEntries(babies.map((b) => [`baby_${b.id}`, { lineage: b.lineage, qtable: b.q }])) };
+  return { params: P, history, brains: Object.fromEntries(babies.map((b) => [`baby_${b.id}`, { lineage: b.lineage, qtable: qToObject(cs, b.q) }])) };
+}
+
+// Same outsider model as externalFlow, reading prices from the ring buffer.
+function externalFlowFast(scenario, t, ticks, pool, hist, r, ext) {
+  if (scenario === 'dead') return;
+  const trade = (side, weth) => {
+    if (side === 'buy') { ext.coin += pool.buy(weth); ext.wethIn += weth; ext.trades++; }
+    else { const c = Math.min(ext.coin, weth / pool.price()); if (c <= 0) return; ext.coin -= c; ext.wethOut += pool.sell(c); ext.trades++; }
+  };
+  if (r() < 0.15) trade(r() < 0.5 ? 'buy' : 'sell', 0.0005 + r() * 0.002);
+  if ((scenario === 'launch' || scenario === 'mixed') && r() < Math.exp(-t / (ticks / 6)) * 0.6) trade('buy', 0.001 + r() * 0.004);
+  if (scenario === 'mixed' && hist.length > 15) {
+    const m = pool.price() / hist.at(15) - 1;
+    if (m > 0.05 && r() < 0.3) trade('buy', 0.002);
+    if (m < -0.05 && r() < 0.3) trade('sell', 0.002);
+  }
+  if (scenario === 'mixed' && r() < 0.01) trade('sell', 0.02 + r() * 0.03);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const res = runTournament({ scenario: arg('--scenario', 'mixed'), generations: +arg('--generations', DEFAULTS.generations),
+  const scenario = arg('--scenario', 'mixed');
+  const profiles = scenario === 'real' ? loadProfiles() : undefined;
+  if (scenario === 'real' && !profiles.length) { console.error('no real data: run node sim/fetch-real.mjs first'); process.exit(2); }
+  const res = runTournament({ scenario, profiles, generations: +arg('--generations', DEFAULTS.generations),
     ticks: +arg('--ticks', DEFAULTS.ticks), seed: +arg('--seed', 1), grid: arg('--grid', 'live') });
   const ETH_USD = +(process.env.ETH_USD || 3000), usd = (e) => `$${(e * ETH_USD).toFixed(3)}`;
   for (const h of res.history) {

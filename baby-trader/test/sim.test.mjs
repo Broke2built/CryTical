@@ -48,3 +48,22 @@ test('replay sim runs on synthetic data and reports unique entries', () => {
   for (const ra of Object.values(agg.roleAgg)) for (const st of Object.values(ra.signalStats)) assert.ok(st.uniqueEntries <= st.trades);
   void out;
 });
+
+test('synth: fitted profile reproduces persistence and impacts sized to the target move', async () => {
+  const { fitProfile, makeFlow, sizeForImpact } = await import('../sim/synth.mjs');
+  // 300 swaps, 1 per 10 blocks, strongly persistent direction, impact 0.01
+  let dir = 1; const ev = [];
+  for (let k = 0; k < 300; k++) { if (k % 8 === 0) dir = -dir; ev.push([k * 10, dir * 0.01]); }
+  const p = fitProfile('x', ev);
+  assert.ok(p.persist > 0.8 && p.persist < 0.95, `persist ${p.persist}`);
+  let s = 3; const r = () => ((s = (s * 16807) % 2147483647) / 2147483647);
+  const f = makeFlow(p, r);
+  let same = 0, n = 0, last = 0;
+  for (let t = 0; t < 3000; t++) for (const imp of f.step()) { if (last) { n++; if (Math.sign(imp) === Math.sign(last)) same++; } last = imp; }
+  assert.ok(Math.abs(same / n - p.persist) < 0.05, `generated persistence ${same / n} vs fitted ${p.persist}`);
+  const pool = new Pool(0.1, 1e7, 0.01), p0 = pool.price();
+  const { side, amount } = sizeForImpact(pool, 0.05);
+  assert.equal(side, 'buy');
+  pool.buy(amount);
+  assert.ok(Math.abs(Math.log(pool.price() / p0) - 0.05) < 1e-6);
+});

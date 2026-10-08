@@ -6,7 +6,9 @@ In the code, search for `(review)` and `NOTES FOR WREN` to find every change.
 
 ```
 npm install          # once (viem)
-npm test             # 19 tests, ~5s, no network, no money
+npm test             # 20 tests, ~5s, no network, no money
+node sim/fetch-real.mjs                                          # pull ~4h of REAL Base swap flow (run it every few hours; files accumulate)
+node sim/train.mjs --epochs 20 --gens 50                         # ~100k+ baby-years/hour on all cores, then an out-of-sample exam
 node sim/tournament.mjs --scenario mixed --generations 20        # babies fight on a simulated pool
 node local-runner/fork-tournament.mjs --ticks 90 --outsiders 4 --activity 0.5   # babies fight on a private Base fork (needs foundry's anvil)
 ```
@@ -104,7 +106,32 @@ A baby only profits if someone **else** takes the other side. So the question is
 - **The minimum-output word is the only sandwich protection on mainnet.** The fork harness sets it to 1. Never copy that trick into `worker.js`.
 - **Ticks take ~10–20 s each on a fork** (quotes plus 16 wallets). A 90-tick fight takes about 20–30 min. Leave it running.
 
-## 9. File map
+## 9. What the fast sim proved (the most important section)
+
+The sim no longer touches any API. Outside traders are generated **procedurally from real Base order flow**, then the babies train on it on every core.
+- **Data:** 140k real swaps from 325 thin pools in one 4-hour fetch, kept as 237 usable pool profiles.
+- **Speed:** about **110,000 baby-years per hour** on 4 cores.
+
+Real order-flow facts it learned:
+- Direction **persists ~66–79%**: buys follow buys.
+- Trades come in **bursts**: gap variability 1.7× random.
+- Impacts are **heavy-tailed**: the top 1% are ~15× the median.
+
+Profiles are split into training pools and **held-out** pools the babies never see.
+
+Results, with the honest numbers:
+1. **The current strategy family has no edge.** This covers dip-buy, momentum, or both, on the live or the tight grid. On unseen pools a baby's median day is **−0.5% to −1.5%**, and only **20–25% of days are profitable**. Training (evolution plus bandit) does not beat untrained by more than noise. **Speed was never the bottleneck. The strategy space is.** The bandit only tunes thresholds of strategies that lose after fees.
+2. **At ~$0.30 per baby every configuration loses,** because gas is ~2% per swap. At ~$3 per baby, gas stops dominating, but the strategy still has no edge.
+3. **Babies in the same pool eat each other's edge.** One baby alone in a pool loses less than when 16 share it (tight grid: −1.2% vs −1.5%/day median). Fleet-vs-fleet in one pool is a net drain even in the sim. Spread babies across pools; never stack them.
+4. **The single-tournament "survival of the fittest" collapses into one family within ~50 generations.** `train.mjs` uses islands (one per core) with migration to keep diversity.
+
+What to do with this:
+- **Do not ship trained brains** until `sim/train.mjs` prints `EDGE` on held-out pools. It is built to refuse when the edge is noise.
+- **The next gain is in the strategy space, not the learner.** Add new strategy ideas as new signals in `sim/tournament.mjs` (`P.strategy`), run `train.mjs`, and keep only what shows an out-of-sample `EDGE`.
+  - Ideas worth testing: fade bot ping-pong, trade only after N external buyers, exit on order-flow reversal instead of fixed targets, size by measured pool depth.
+- **More real data = less overfit.** Run `fetch-real.mjs` on a cron every 3–4h. Each run adds a file, and `synth.mjs` learns from all of them. A keyed archive RPC can fetch days at once.
+
+## 10. File map
 
 | File | What it is |
 |---|---|
@@ -116,4 +143,7 @@ A baby only profits if someone **else** takes the other side. So the question is
 | `local-runner/fork-tournament.mjs` | **New.** 16 babies fight on a private Base fork using the real `worker.js` |
 | `sim/tournament.mjs` | **New.** 16 babies fight on a simulated AMM, with generational culling |
 | `sim/sim.mjs` | Replay sim (fixed) |
-| `test/` | 19 tests, including a fake chain that runs real ticks |
+| `sim/fetch-real.mjs` | **New.** Pulls real Base V4 swap flow into `sim/data/` |
+| `sim/synth.mjs` | **New.** Learns order-flow patterns per real pool and generates endless realistic markets |
+| `sim/train.mjs` | **New.** Island training on every core, plus the held-out exam that refuses to bless a fake edge |
+| `test/` | 20 tests, including a fake chain that runs real ticks |
