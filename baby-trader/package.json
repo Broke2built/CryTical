@@ -1,0 +1,12 @@
+{
+  "name": "baby-trader",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/",
+    "check": "node --check worker.js && for f in local-runner/*.mjs sim/*.mjs; do node --check $f || exit 1; done"
+  },
+  "dependencies": {
+    "viem": "2.37.0"
+  }
+}
