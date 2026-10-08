@@ -157,7 +157,11 @@ const TOP_TICK_WINDOW_MS = 10 * 60e3;
 const TOP_TICK_BONUS_PER_PCT = 500;
 const LOSS_CUT_BONUS_PER_PCT = 300; // #2: sold at a loss, price dropped further = smart cut
 const FOMO_WINDOW_MS = 2 * 60e3;  // #3: another wallet buys within 2 min after your sell at higher price
-const FOMO_BONUS = 200;           //     = you sold into their FOMO. Predatory and profitable.
+// DISABLED (review 2026-10-08): fleet:buyLog only contains OUR wallets, so this bonus
+// only ever paid a baby for selling into a SIBLING's buy — same beneficial owner on
+// both sides of the flow. That is the onchain shape of a wash trade. Points-only, so
+// zeroing it changes no Q-learning; it just stops rewarding self-dealing.
+const FOMO_BONUS = 0;             //     (was 200)
 const FIRST_OUT_CROWD_THRESH = 0.9; // #4: crowdedness > 0.9 (14.4+/16 holding)...
 const FIRST_OUT_WINDOW_MS = 30 * 60e3; // ...and first sell in 30 min = standoff-breaker
 const FIRST_OUT_BONUS = 500;
@@ -167,7 +171,10 @@ const HOLDING_TAX_FLAT_PCT = 1.0;
 // earns base heartbeat points, scaled by market flow. Prevents "kill a coin by not doing shit" —
 // on a dead coin, trading IS the job (bootstrap momentum). When externals join, the multiplier
 // rewards fighting in a live arena. Profit still dominates; heartbeat is the nudge, not the goal.
-const HEARTBEAT_BASE_PTS = 5;       // per trade (buy or sell)
+// DISABLED (review 2026-10-08): paying points for trading-to-keep-a-coin-alive is a
+// volume incentive, and 16 wallets with one owner churning a coin for activity is
+// exactly what "no fake volume" forbids. Profit is the only thing worth paying for.
+const HEARTBEAT_BASE_PTS = 0;       // per trade (was 5)
 const HEARTBEAT_MED_FLOW_USD = 1.0; // $1+ volume in window = 2x
 const HEARTBEAT_HIGH_FLOW_USD = 10.0; // $10+ volume in window = 3x
 const TOURNAMENT_INTERVAL_MS = 24 * 3600e3; // #6: daily zero-sum ranking
@@ -215,7 +222,26 @@ const SELL_PROFIT_MULT = 1.5;     // sell only when profit >= 1.5x total gas (An
 const PARTIAL_SELL_MIN_USD = 5;   // target-hit: at/above this sell value, take 50% + keep a runner (Anthony 2026-10-07)
 const PARTIAL_SELL_FRACTION = 0.5;// tranche size on big positions — runner keeps trailing/stop-loss logic
 const RUNNER_DUST_USD = 0.01;     // remaining value below this -> just sell 100% (not worth the extra tx)
+// NOTE (review 2026-10-08): the ops brief says "0.0002 ETH is untouchable" but this
+// was 0.00005. At ~$0.25/wallet a 0.0002 reserve means NO wallet can buy, so the
+// default is left as-is; set env GAS_RESERVE_WEI to enforce the documented rule.
 const GAS_RESERVE_WEI = 50000000000000n;     // 0.00005 ETH kept back for future txs
+// Catastrophic stop (review 2026-10-08): the per-wallet stop-loss only fires after
+// 1.5-4.5h held, so a position down 60% in 10 minutes just sat there. This one has
+// no time gate.
+const HARD_STOP_PCT = 40;
+// Bottom-buy structural fix (review 2026-10-08): "within 10% of the 24h low" fired
+// on EVERY new low (low resets to now -> 0% above it), i.e. it bought falling knives.
+// Now the low must have held for a while AND price must have bounced off it.
+const BOTTOM_MIN_LOW_AGE_MS = 30 * 60e3;   // no new low for 30 min
+const BOTTOM_MIN_BOUNCE_PCT = 2;            // at least 2% off the low
+// Stored lows more than this many x below spot are treated as corrupt (unit mix-ups,
+// pre-pool zero reads, inverted pools) — the cause of the "7e29% above low" logs.
+const LOW_SANITY_MAX_RATIO = 1000n;
+// NN gate (review 2026-10-08): a ~1.6k-param net trained on a handful of closes is a
+// random filter. Veto/sizing/early-exit only switch on after this many trained closes;
+// before that the NN is scored and logged but has no say.
+const NN_MIN_TRAINED = 100;
 const BOARD_LOG_MS = 24 * 3600 * 1000;       // log leaderboard every 24h
 
 const ERC20_ABI = [
@@ -342,6 +368,8 @@ async function reconstructBuyCombo(env, publicClient, position, seed, log) {
   // Approximation 0: the wallet's own buy block is unknown in current position
   // records (executeBuy never wrote origBuyBlock — as of 2026-10-08 no record has
   // it). Without a buy block we cannot place the trade in time -> baseline.
+  // (review) executeBuy writes `buyBlock`; this used to read only `origBuyBlock`.
+  if (position.origBuyBlock == null && typeof position.buyBlock === 'number') position.origBuyBlock = position.buyBlock;
   if (!position.origBuyBlock || typeof position.origBuyBlock !== 'number') {
     log(`reconstructBuyCombo: no origBuyBlock on position — crediting ${BASELINE_UNATTRIBUTED_KEY}`);
     return BASELINE_UNATTRIBUTED_KEY;
@@ -445,6 +473,15 @@ async function reconstructBuyCombo(env, publicClient, position, seed, log) {
   // Approximation 3: the wallet's seeded params stand in for the firing combo's
   // thresholds — seed is per-wallet persistent (margin/size/cooldownMin) and the
   // dump/value regime comes from the archive reads above.
+  // (review) HONESTY CHECK. snapDump(0) = 30 and snapValue(0) = 70, so a buy with NO
+  // dip at all used to be credited to the 30%-dump / 70%-dip cell — a combo that could
+  // not have fired. That is where every "learned" 30_70_* Q-value in the live tables
+  // came from: fabricated attribution. If no grid cell's gate would have fired at the
+  // reconstructed regime, the only honest key is the baseline.
+  if (dropPct2 < Math.min(...DUMP_GRID) && dPct < Math.min(...VALUE_GRID)) {
+    log(`reconstructBuyCombo: regime at buy (drop ~${dropPct2.toFixed(1)}%, dip ~${dPct.toFixed(1)}%) would not fire any grid combo — crediting ${BASELINE_UNATTRIBUTED_KEY}`);
+    return BASELINE_UNATTRIBUTED_KEY;
+  }
   const dumpB = snapDump(Math.max(0, dropPct2));
   const valueB = snapValue(Math.max(0, dPct));
   const marginB = snapMargin(Number(seed && seed.margin) || 1);
@@ -527,6 +564,43 @@ function sqToWethPerBrawl(sq) {
 // dipBps > 0 means price fell. spikeBps > 0 means price rose.
 const dipBps = (highSq, nowSq) => (highSq > 0n ? Number(((highSq - nowSq) * 10000n) / highSq) : 0);
 const riseBps = (oldSq, nowSq) => (oldSq > 0n ? Number(((nowSq - oldSq) * 10000n) / oldSq) : 0);
+
+// ------------------------------------------------------------------ 24h low (review) ---
+// WREN, READ THIS: the old rule was "keep the stored low until it is 24h old or price
+// goes below it, then reset it to the CURRENT price". Three failures came out of that:
+//   1. Every reset and every new low set low = now, so "% above 24h low" was 0 and the
+//      BOTTOM signal fired on every down-tick of a downtrend (the 9% win rate).
+//   2. One corrupt read (pool not yet initialised, an inverted/other pool's price under
+//      the same KV key) stuck for 24h and produced "7e29% above low".
+//   3. After 24h the low jumped to spot even if price was far above the real recent low.
+// rollLow24 fixes 2 and 3: corrupt lows are discarded, expired lows are rebuilt from the
+// price buckets we actually have. bottomSignal (below) fixes 1.
+// Returns {sq: string, ts: number} where ts = when THIS low was printed.
+function rollLow24(stored, nowSq, now, buckets) {
+  const fromBuckets = () => {
+    let best = { sq: nowSq, ts: now };
+    for (const b of buckets || []) {
+      const bsq = BigInt(b.sq);
+      if (bsq <= 0n || now - b.ts > LOW_WINDOW_MS) continue;
+      if (bsq * LOW_SANITY_MAX_RATIO < nowSq) continue; // same sanity rule as below
+      if (bsq < best.sq) best = { sq: bsq, ts: b.ts };
+    }
+    return { sq: best.sq.toString(), ts: best.ts };
+  };
+  if (!stored || stored.sq == null) return fromBuckets();
+  const lowSq = BigInt(stored.sq);
+  if (lowSq <= 0n || lowSq * LOW_SANITY_MAX_RATIO < nowSq) return fromBuckets(); // corrupt
+  if (now - stored.ts > LOW_WINDOW_MS) return fromBuckets();                     // expired
+  if (nowSq < lowSq) return { sq: nowSq.toString(), ts: now };                   // new low
+  return { sq: lowSq.toString(), ts: stored.ts };
+}
+// BOTTOM BUY: buy the HIGHER LOW, not the new low. Price must be off the low by
+// BOTTOM_MIN_BOUNCE_PCT..NEAR_LOW_PCT and the low must not have been broken for
+// BOTTOM_MIN_LOW_AGE_MS. This is what "support held" means to a human trader.
+function bottomSignal(aboveLowPct, lowAgeMs) {
+  return aboveLowPct >= BOTTOM_MIN_BOUNCE_PCT && aboveLowPct <= NEAR_LOW_PCT
+    && lowAgeMs >= BOTTOM_MIN_LOW_AGE_MS;
+}
 
 // ------------------------------------------------------------------ PLUS ULTRA senses ---
 // (Anthony 2026-10-07 23:07: "superhuman eyes and ears, plus ultra")
@@ -624,7 +698,7 @@ function computePriceVelAnn(buckets, now) {
       if (now - buckets[k].ts > 60 * 60e3) continue;
       const a = buckets[k - 1].sq, b = buckets[k].sq;
       if (a <= 0n || b <= 0n) continue;
-      rets.push(0.5 * Math.log(Number(b) / Number(a)));
+      rets.push(Math.log(Number(b) / Number(a))); // sq is linear in price (review fix: was 0.5*log)
     }
     if (rets.length < 2) return 0;
     const m = rets.reduce((s, v) => s + v, 0) / rets.length;
@@ -1191,8 +1265,9 @@ function buildFeatures(o) {
   };
   const logRet = (fromSq, toSq) => {
     if (!fromSq || fromSq <= 0n || !toSq || toSq <= 0n) return 0;
-    // sq is price^2; log return of price = 0.5 * ln(sqTo/sqFrom)
-    return 0.5 * Math.log(Number(toSq) / Number(fromSq));
+    // (review) sq = sqrtPriceX96^2 = price * 2^192, i.e. LINEAR in price. The old code
+    // assumed sq = price^2 and halved every return/volatility feature.
+    return Math.log(Number(toSq) / Number(fromSq));
   };
 
   // 1-5: multi-timeframe returns
@@ -1298,10 +1373,9 @@ function buildFeatures(o) {
         for (const b of buckets) {
           if (b.ts >= position.buyTs && b.sq > peakSq) peakSq = b.sq;
         }
-        // regret = (peakPrice - nowPrice) / entryPrice
-        //        = sqrt(peakSq/entrySq) - sqrt(nowSq/entrySq)
+        // regret = (peakPrice - nowPrice) / entryPrice  (sq is linear in price)
         const eN = Number(entrySq);
-        const regret = Math.sqrt(Number(peakSq) / eN) - Math.sqrt(Number(nowSq) / eN);
+        const regret = (Number(peakSq) - Number(nowSq)) / eN;
         F[32] = clip01(Math.max(0, regret));
       }
     } catch (e) { F[32] = 0; /* regret is advisory — never break features */ }
@@ -1351,7 +1425,7 @@ function buildFeatures(o) {
       // Take up to 31 most recent buckets for 30 one-min intervals.
       const n = Math.min(buckets.length, 31);
       const recent = buckets.slice(buckets.length - n);
-      const px = (sq) => Math.sqrt(Number(sq));
+      const px = (sq) => Number(sq); // linear in price (review fix: was sqrt)
       const pNow = px(recent[recent.length - 1].sq);
       const pAgo = px(recent[0].sq);
       let pathSum = 0;
@@ -1368,7 +1442,7 @@ function buildFeatures(o) {
   //   (touches of 1h high - touches of 1h low) in last 4h, tanh-normalized.
   //   +1 = pressing resistance (breakout brewing), -1 = hammering support
   //   (breakdown brewing). Touch = bucket close within 0.5% of the level
-  //   (~1% in sq terms since sq = price^2). Traders trade levels, not returns.
+  //   (sq is linear in price, so 0.5% in sq = 0.5% in price). Traders trade levels.
   //   Fail-soft 0 when levels unknown.
   F[40] = 0;
   try {
@@ -1380,9 +1454,9 @@ function buildFeatures(o) {
         if (b.ts < cutoff4h) continue;
         const sqN = Number(b.sq);
         if (sqN <= 0) continue;
-        // Within 1% of level in sq terms ≈ 0.5% in price terms.
-        if (Math.abs(sqN - hiN) / hiN < 0.01) touchHi++;
-        if (Math.abs(sqN - loN) / loN < 0.01) touchLo++;
+        // Within 0.5% of the level (sq is linear in price — review fix: was 1%).
+        if (Math.abs(sqN - hiN) / hiN < 0.005) touchHi++;
+        if (Math.abs(sqN - loN) / loN < 0.005) touchLo++;
       }
       F[40] = Math.tanh((touchHi - touchLo) / 4);
     }
@@ -1394,9 +1468,10 @@ function buildFeatures(o) {
   F[41] = 0;
   try {
     if (stats && stats.trades > 0) {
-      const rw = stats.rewards || [];
+      // (review) prefer real P&L history; shaped rewards are a fallback for old stats.
+      const rw = stats.pnlHistory && stats.pnlHistory.length ? stats.pnlHistory : (stats.rewards || []);
       if (rw.length > 0) {
-        const wins20 = rw.filter((r) => r >= 0).length;
+        const wins20 = rw.filter((r) => r > 0).length;
         F[41] = (wins20 / rw.length - 0.5) * 2;
       } else {
         // Fall back to cumulative counters when rewards history is absent.
@@ -1500,7 +1575,7 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
   // Reserve: gas for this buy + gas for the eventual sell + dust.
   // (Anthony 2026-10-07 16:28: lowered from 4x to 1x GAS_RESERVE so the
   //  $0.27-funded burners can trade — 0.00005 reserve leaves ~$0.10/trade.)
-  const reserve = GAS_RESERVE_WEI;
+  const reserve = env.GAS_RESERVE_WEI ? BigInt(env.GAS_RESERVE_WEI) : GAS_RESERVE_WEI;
   if (ethBal <= reserve) {
     log(`SKIP buy: balance ${formatEther(ethBal)} ETH <= reserve ${formatEther(reserve)} ETH`);
     return null;
@@ -1519,6 +1594,17 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
   log(`quote target=${target} amountOut=${q.quote.amountOut} brawl-wei`);
 
   if (dryRun) { log('DRY_RUN: skip buy broadcast'); return null; }
+
+  // (review) Q-credit key = the GRID cell the bandit picked. The old code rebuilt the
+  // key from combo.size, which the NN overrides with any integer 10-100 — so a close
+  // was credited to e.g. "30_70_3_47_cd6", a key that is not in the grid, and the
+  // combo that actually fired never learned anything.
+  const creditKey = combo.key || comboKey(combo.dump, combo.value, combo.margin, combo.size, clampCd(combo.cd));
+  // (review) WRITE-AHEAD: record what we are about to do BEFORE broadcasting. If the
+  // tx lands but the position write below fails, orphan reconciliation reads this and
+  // keeps the true combo key instead of inventing one. This is the root fix for the
+  // "everything lands in baseline_unattributed" problem.
+  await kvPutCritical(env, `wallet:${i}:pendingBuy`, { comboKey: creditKey, sizePct: combo.size, ts: Date.now() }, log);
 
   const account = privateKeyToAccount(env[`BURNER_KEY_${i}`]);
   const { hash, gasPrice } = await sendRawTx(publicClient, account, {
@@ -1556,7 +1642,7 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
     buyCostUsd, buyGasUsd,
     amountWei: balAfter.toString(),
     buyPriceWeth: priceWeth,
-    comboKey: comboKey(combo.dump, combo.value, combo.margin, combo.size, clampCd(combo.cd)),
+    comboKey: creditKey,
     marginAtOpen: combo.margin,
     sizeAtOpen: combo.size,
     buyTx: hash, buyTs: Date.now(),
@@ -1569,6 +1655,7 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
     ethBalPostBuy: (ethBal - buyWei - buyGasWei).toString(),
   };
   await kvPutCritical(env, `wallet:${i}:position`, position, log);
+  await kvPut(env, `wallet:${i}:pendingBuy`, null); // position is durable — write-ahead consumed
   await kvPutCritical(env, `wallet:${i}:lastTrade`, Date.now(), log);
   log(`BOUGHT ${formatEther(balAfter)} BRAWL for $${buyCostUsd.toFixed(4)} (+$${buyGasUsd.toFixed(4)} gas) tx ${hash}`);
   // ---- Fleet buy log (2026-10-07 23:05 EDT, superintelligence #3 FOMO-exploit) ----
@@ -1592,13 +1679,15 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
       const sellSqN = Number(BigInt(ls.sq));
       const buySqN = Number(ctx.nowSq);
       if (sellSqN > 0 && buySqN > 0 && buySqN < sellSqN) {
-        const dipFrac = 1 - Math.sqrt(buySqN / sellSqN); // price dip fraction
+        // (review) sq = sqrtPriceX96^2 is LINEAR in price (price = sq / 2^192), not
+        // price^2 — the old sqrt() here halved every swing bonus.
+        const dipFrac = 1 - buySqN / sellSqN; // price dip fraction
         const swingBonus = Math.round(dipFrac * 1000);
         if (swingBonus > 0) {
           const st = (await kvGet(env, `wallet:${i}:stats`, null)) || { points: 0 };
           st.points = (st.points || 0) + swingBonus;
           await kvPut(env, `wallet:${i}:stats`, st);
-          const sellPx = Math.sqrt(sellSqN), buyPx = Math.sqrt(buySqN);
+          const sellPx = sellSqN / 2 ** 192, buyPx = buySqN / 2 ** 192;
           log(`SWING BONUS: +${swingBonus}pts (sold ${sellPx.toExponential(3)}, rebought ${buyPx.toExponential(3)}, ${(dipFrac * 100).toFixed(1)}% dip)`);
         }
       }
@@ -1645,8 +1734,15 @@ function heartbeatPts(ctx) {
   } catch (e) { /* fail-soft: 1x */ }
   return HEARTBEAT_BASE_PTS * mult;
 }
-// A 20% ROI in 0.5h scores ~1333; a 10% ROI in 0.03h scores ~970; losses score
-// negative through the same formula. The 1.5x-gas hard gate remains the floor.
+// A 20% ROI in 0.5h scores ~1333; a 10% ROI in 0.03h scores ~970. The 1.5x-gas hard
+// gate remains the floor.
+// (review 2026-10-08) Losses are NOT time-discounted any more. Dividing a negative ROI
+// by (1+hours) made a -30% loss held 10h score -273 vs -2000 for the same loss cut in
+// 30 min — the bandit was being paid to hold losers. Time only discounts gains.
+function closeReward(roi, holdHours) {
+  const hh = Math.max(holdHours, 1 / 3600);
+  return Math.round(roi >= 0 ? (roi * 10000) / (1 + hh) : roi * 10000);
+}
 async function recordClose(env, i, position, o, log) {
   const { profitUsd, sellGasUsd, costUsd, costGasUsd, holdHours, hash, reason, estimated,
     firstOutBonus, heartbeatBonus } = o;
@@ -1659,7 +1755,7 @@ async function recordClose(env, i, position, o, log) {
   // goes to `reward` → points/leaderboard/exploration, NEVER to Q. Previously a
   // +500 first-out bonus could flip a -30% ROI loss into a positive Q-update,
   // teaching the bandit that a losing regime was good.
-  const baseReward = Math.round(roi * 10000 / (1 + hh));
+  const baseReward = closeReward(roi, hh);
   let reward = baseReward;
 
   // #4 FIRST-OUT BONUS (2026-10-07 23:05 EDT): broke the standoff when crowded.
@@ -1734,7 +1830,12 @@ async function recordClose(env, i, position, o, log) {
     if (pending && pending.features && pending.features.length === NN_IN) {
       const fwd = nnForward(nnw, pending.features);
       const tBuy = profitUsd <= 0 ? 0 : (roi >= 0.20 ? 1 : Math.max(0, Math.min(1, roi / 0.20)));
-      const tSize = Math.max(0, Math.min(1, ((pending.buySizePct || 70) - 10) / 90));
+      // (review) The old target echoed the size that was used, win or lose — the size
+      // head could only learn to imitate itself. Now: winners nudge size up 10 points,
+      // losers nudge it down 10. Still crude, but it is an actual learning signal.
+      const usedSize = pending.buySizePct || 70;
+      const tSizePct = Math.max(10, Math.min(100, usedSize + (profitUsd > 0 ? 10 : -10)));
+      const tSize = (tSizePct - 10) / 90;
       nnTrain(nnw, fwd.cache, [tBuy, tSize, 0], [1, 1, 0]);
       log(`NN trained buy/size heads on buy-time features: buy->${tBuy.toFixed(2)} size->${tSize.toFixed(2)}`);
     }
@@ -1745,6 +1846,8 @@ async function recordClose(env, i, position, o, log) {
       nnTrain(nnw, fwdS.cache, [0, 0, tSell], [0, 0, 1]);
       log(`NN trained sell head on holding-time features: sell->${tSell.toFixed(2)} (ROI ${(roi * 100).toFixed(1)}%)`);
     }
+    // (review) count training closes; the NN only gets authority after NN_MIN_TRAINED.
+    if (pending || pendingSell) nnw.nTrained = (nnw.nTrained || 0) + 1;
     await nnSave(env, i, nnw);
     await kvPut(env, nnPendingKey(i), null); // consume
     await kvPut(env, `nn:sellfeat:${i}`, null); // consume
@@ -1757,10 +1860,14 @@ async function recordClose(env, i, position, o, log) {
   stats.points += reward;
   stats.trades += 1;
   stats.pnlUsd += profitUsd;
-  if (reward >= 0) stats.wins += 1; else stats.losses += 1;
+  // (review 2026-10-08) win/loss and the tilt streak are judged on REAL P&L, not on
+  // the shaped reward — a -$0.01 trade plus a +5 heartbeat used to count as a "win",
+  // which corrupted F[41] win rate and F[42] tilt.
+  if (profitUsd > 0) stats.wins += 1; else stats.losses += 1;
   // Self-awareness bookkeeping (2026-10-07 23:41 EDT, trader-needs audit F[42]/F[43]):
   // streak = consecutive losses (tilt detector), peakPoints = high-water mark (drawdown).
-  if (reward >= 0) { stats.streak = 0; } else { stats.streak = (stats.streak || 0) + 1; }
+  if (profitUsd > 0) { stats.streak = 0; } else { stats.streak = (stats.streak || 0) + 1; }
+  stats.pnlHistory = [...(stats.pnlHistory || []), profitUsd].slice(-20);
   stats.peakPoints = Math.max(stats.peakPoints || 0, stats.points);
   stats.rewards.push(reward);
   if (stats.rewards.length > 20) stats.rewards.shift();
@@ -2186,6 +2293,11 @@ async function processWallet(ctx, i, log0) {
         });
         orphanValueUsd = Number(formatEther(BigInt(oq.quote.amountOut))) * ethUsd;
       } catch (e) { log(`orphan sell-quote failed (${e.message}) — will retry quote next tick`); }
+      // (review) If executeBuy left a write-ahead record, this "orphan" is really our
+      // own buy whose position write failed — keep its TRUE combo key and buy time.
+      const wal = await kvGet(env, `wallet:${i}:pendingBuy`, null);
+      const walOk = wal && wal.comboKey && (now - wal.ts) < 24 * 3600e3 && (wal.comboKey in blankQTable());
+      if (walOk) log(`orphan matches write-ahead buy record (combo ${wal.comboKey}) — attribution preserved`);
       if (orphanValueUsd > 0) {
         // Snapshot current ETH as the stale-clear reconstruction baseline
         // (2026-10-07 18:52 EDT: w0's spike-sell confirmed 40s after the receipt
@@ -2194,11 +2306,13 @@ async function processWallet(ctx, i, log0) {
         position = {
           buyCostUsd: orphanValueUsd, buyGasUsd: 0,
           amountWei: orphanBal.toString(), buyPriceWeth: null,
-          comboKey: 'orphan_0_0_0', marginAtOpen: 3, sizeAtOpen: 0,
-          buyTx: 'orphan-reconcile', buyTs: now, reconciled: true,
+          comboKey: walOk ? wal.comboKey : 'orphan_0_0_0', marginAtOpen: walOk ? parseCombo(wal.comboKey).margin : 3,
+          sizeAtOpen: walOk ? wal.sizePct : 0,
+          buyTx: 'orphan-reconcile', buyTs: walOk ? wal.ts : now, reconciled: true,
           ethBalPostBuy: ethNow.toString(),
         };
         await kvPutCritical(env, `wallet:${i}:position`, position, log);
+        if (walOk) await kvPut(env, `wallet:${i}:pendingBuy`, null);
         log(`reconciled: cost basis = current sell value $${orphanValueUsd.toFixed(4)} (flagged reconciled)`);
       } else {
         // Quote failed but we HOLD tokens — never leave position null. Record the
@@ -2267,10 +2381,13 @@ async function processWallet(ctx, i, log0) {
   // cooldown, so the ROI×speed Q-update on every close teaches which re-entry
   // speed pays. Holding wallets are gated by the combo that OPENED the position;
   // flat wallets by the combo selected this tick.
-  let gateCd = activeCd;
-  if (position && position.comboKey) gateCd = clampCd(parseCombo(position.comboKey).cd);
+  // (review) The cooldown now gates BUYS only. It used to run before the holding
+  // branch too, so for 3-20 min after every buy a wallet could not evaluate ANY exit —
+  // not the target, not the stop-loss. A coin that dumped right after entry was
+  // unsellable until the timer ran out.
+  const gateCd = activeCd;
   const cooldownMs = gateCd * 60 * 1000;
-  if (now - lastTrade < cooldownMs) {
+  if (!position && now - lastTrade < cooldownMs) {
     log(`cooldown: ${Math.round((cooldownMs - (now - lastTrade)) / 60000)}m left (cd${gateCd}, combo ${ck}) — skip`);
     return;
   }
@@ -2355,7 +2472,11 @@ async function processWallet(ctx, i, log0) {
 
     // 3) Target exit: profit >= 1.5x total gas (Anthony 2026-10-07 — higher bar).
     const totalGasEst = position.buyGasUsd + sellGasUsd;
-    const minProfit = SELL_PROFIT_MULT * totalGasEst;
+    // (review) The MARGIN dimension of the Q grid (1/3/5%) used to do NOTHING — it was
+    // only printed. 1/3 of the 432 arms were copies of each other and split the data
+    // 3 ways. Now the target is the larger of the gas bar and the combo's margin %.
+    const marginUsd = position.buyCostUsd * (Number(position.marginAtOpen) || 0) / 100;
+    const minProfit = Math.max(SELL_PROFIT_MULT * totalGasEst, marginUsd);
     if (profitEst >= minProfit) {
       // Tranche logic (Anthony 2026-10-07 15:23): big positions take 50% and keep
       // a runner; small ones dump 100% (an extra sell tx would eat the profit).
@@ -2364,7 +2485,7 @@ async function processWallet(ctx, i, log0) {
       if (sellValueUsd >= PARTIAL_SELL_MIN_USD && sellValueUsd * (1 - PARTIAL_SELL_FRACTION) >= RUNNER_DUST_USD) {
         sellFrac = PARTIAL_SELL_FRACTION;
       }
-      log(`TARGET HIT: profit $${profitEst.toFixed(4)} >= 1.5x gas $${minProfit.toFixed(4)} — ${sellFrac < 1 ? `taking ${(sellFrac * 100).toFixed(0)}% + runner (sell value $${sellValueUsd.toFixed(2)})` : 'selling ALL'}`);
+      log(`TARGET HIT: profit $${profitEst.toFixed(4)} >= max(1.5x gas, margin) $${minProfit.toFixed(4)} — ${sellFrac < 1 ? `taking ${(sellFrac * 100).toFixed(0)}% + runner (sell value $${sellValueUsd.toFixed(2)})` : 'selling ALL'}`);
       await executeSell(ctx, i, position, 'target', log, sellFrac).catch((e) => log(`sell error: ${e.message}`));
       await kvPut(env, `wallet:${i}:rng`, rngState);
       return;
@@ -2399,7 +2520,9 @@ async function processWallet(ctx, i, log0) {
       // holding-time features but used to TRAIN on buy-time features. Stash the
       // latest holding-time vector; recordClose trains the sell head on it.
       try { await kvPut(env, `nn:sellfeat:${i}`, { features: feats, ts: now }); } catch (e) { /* advisory */ }
-      if (sellScore > NN_SELL_TRIGGER && profitEst > 0) {
+      const nnLive = (nnw.nTrained || 0) >= NN_MIN_TRAINED;
+      if (!nnLive) log(`NN not trusted yet (${nnw.nTrained || 0}/${NN_MIN_TRAINED} trained closes) — early-exit disabled`);
+      if (nnLive && sellScore > NN_SELL_TRIGGER && profitEst > 0) {
         log(`NN EARLY EXIT: sellScore ${sellScore.toFixed(3)} > ${NN_SELL_TRIGGER}, profit $${profitEst.toFixed(4)} > 0 — selling`);
         await executeSell(ctx, i, position, 'nn-early', log).catch((e) => log(`sell error: ${e.message}`));
         await kvPut(env, `wallet:${i}:rng`, rngState);
@@ -2414,6 +2537,12 @@ async function processWallet(ctx, i, log0) {
     const heldMs = now - position.buyTs;
     const underwaterPct = position.buyCostUsd > 0 ? (profitEst / position.buyCostUsd) * 100 : 0;
     const sl = walletStopLoss(i);
+    if (underwaterPct <= -HARD_STOP_PCT) {
+      log(`HARD STOP: ${underwaterPct.toFixed(1)}% <= -${HARD_STOP_PCT}% (no time gate) — selling`);
+      await executeSell(ctx, i, position, 'stop-loss', log).catch((e) => log(`sell error: ${e.message}`));
+      await kvPut(env, `wallet:${i}:rng`, rngState);
+      return;
+    }
     if (underwaterPct <= -sl.pct && heldMs >= sl.holdMs) {
       log(`STOP-LOSS: ${underwaterPct.toFixed(1)}% <= -${sl.pct.toFixed(1)}% (w${i} threshold) after ${(heldMs / 3600000).toFixed(1)}h >= ${(sl.holdMs / 3600000).toFixed(1)}h — selling at loss (discipline)`);
       await executeSell(ctx, i, position, 'stop-loss', log).catch((e) => log(`sell error: ${e.message}`));
@@ -2474,9 +2603,11 @@ async function processWallet(ctx, i, log0) {
   // below the 10-min TWAP (2% tolerance). Buying above TWAP isn't value, it's chasing.
   const belowTwap = ctx.twapSq ? nowSq <= ctx.twapSq * 102n / 100n : true;
   const valueBuy = dPct >= valueThr && tickDropPct < STABLE_MAX_DROP_PCT && belowTwap;
-  const bottomBuy = nearLow;
+  // (review) see bottomSignal(): the low must have held 30 min and price must have
+  // bounced >= 2% off it. Buying AT a fresh low was the 9%-win-rate falling knife.
+  const bottomBuy = bottomSignal(aboveLowPct, now - (ctx.low24Ts || now));
   if (!crashBuy && !valueBuy && !bottomBuy) {
-    log(`no buy signal (need: dump>=${dumpThr}% | >=${valueThr}% below 1h high & stable | within ${NEAR_LOW_PCT}% of 24h low) — skip`);
+    log(`no buy signal (need: dump>=${dumpThr}% | >=${valueThr}% below 1h high & stable | ${BOTTOM_MIN_BOUNCE_PCT}-${NEAR_LOW_PCT}% above a 24h low that held ${BOTTOM_MIN_LOW_AGE_MS / 60e3}m) — skip`);
     return;
   }
   const sig = crashBuy ? `CRASH ${Math.max(tickDropPct, twoTickDropPct).toFixed(1)}% dump`
@@ -2506,24 +2637,27 @@ async function processWallet(ctx, i, log0) {
     });
     const fwd = nnForward(nnw, feats);
     const buyScore = fwd.out[0];
-    // Continuous size: 10% + 90% * buySize output → [10%, 100%].
-    nnSizePct = Math.round(10 + 90 * fwd.out[1]);
-    log(`NN: buyScore=${buyScore.toFixed(3)} (gate ${NN_BUY_GATE}) size=${nnSizePct}% (bandit ${activeSize}%)`);
-    if (buyScore < NN_BUY_GATE) {
+    const nnLive = (nnw.nTrained || 0) >= NN_MIN_TRAINED;
+    // Continuous size: 10% + 90% * buySize output → [10%, 100%]. Only once trusted;
+    // an untrained net would size from random weights (could go 100% all-in).
+    const nnRawSize = Math.round(10 + 90 * fwd.out[1]);
+    nnSizePct = nnLive ? nnRawSize : activeSize;
+    log(`NN: buyScore=${buyScore.toFixed(3)} (gate ${NN_BUY_GATE}) size=${nnRawSize}% (bandit ${activeSize}%)${nnLive ? '' : ` — advisory only, ${nnw.nTrained || 0}/${NN_MIN_TRAINED} trained closes`}`);
+    if (nnLive && buyScore < NN_BUY_GATE) {
       log(`NN VETO: buyScore ${buyScore.toFixed(3)} < ${NN_BUY_GATE} — skipping bandit buy signal (${sig})`);
       return;
     }
     // Snapshot features for online training when this trade closes.
     await kvPut(env, nnPendingKey(i), {
       features: feats, buySizePct: nnSizePct, buyTs: now,
-      comboKey: comboKey(dumpThr, valueThr, activeMargin, activeSize, activeCd),
+      comboKey: ck,
     });
   } catch (e) {
     log(`NN buy-gate failed (${e.message}) — proceeding with bandit signal`);
   }
   log(`BUY SIGNAL — ${sig} — sizing ${nnSizePct}% (NN)`);
   try {
-    await executeBuy(ctx, i, { dump: dumpThr, value: valueThr, margin: activeMargin, size: nnSizePct, cd: activeCd }, dPct, log);
+    await executeBuy(ctx, i, { key: ck, dump: dumpThr, value: valueThr, margin: activeMargin, size: nnSizePct, cd: activeCd }, dPct, log);
   } catch (e) {
     log(`buy error: ${e.message}`);
   }
@@ -2684,10 +2818,8 @@ async function runTick(env, log) {
     if (!qHigh || now - qHigh.ts > HIGH_WINDOW_MS || nowSq > BigInt(qHigh.sq)) {
       qHigh = { sq: nowSq.toString(), ts: now };
     }
-    let qLow = await kvGet(env, 'price:low24h', null);
-    if (!qLow || now - qLow.ts > LOW_WINDOW_MS || nowSq < BigInt(qLow.sq)) {
-      qLow = { sq: nowSq.toString(), ts: now };
-    }
+    const qLow = rollLow24(await kvGet(env, 'price:low24h', null), nowSq, now,
+      (await kvGet(env, 'price:buckets', [])) || []);
     // WAKE-UP (Anthony 2026-10-07 14:26): a quiet tick is only quiet if price is NOT
     // sitting at value levels. If we're deep below the 1h high or near the 24h low, a
     // wallet's VALUE/BOTTOM buy signal may fire — fall through to full logic instead
@@ -2696,7 +2828,7 @@ async function runTick(env, log) {
     const qDipPct = dipBps(BigInt(qHigh.sq), nowSq) / 100;
     const qAboveLowPct = nowSq > BigInt(qLow.sq)
       ? Number((nowSq - BigInt(qLow.sq)) * 10000n / BigInt(qLow.sq)) / 100 : 0;
-    const maybeValue = qDipPct >= Math.min(...VALUE_GRID) || qAboveLowPct <= NEAR_LOW_PCT;
+    const maybeValue = qDipPct >= Math.min(...VALUE_GRID) || bottomSignal(qAboveLowPct, now - qLow.ts);
     // HOLDING wake-up (2026-10-07 14:49): wallets with open positions must evaluate
     // exits every tick — a stable price can still be above a wallet's target. Without
     // this, a holding wallet sleeps through profitable exits on quiet ticks.
@@ -2735,16 +2867,13 @@ async function runTick(env, log) {
   if (!high || now - high.ts > HIGH_WINDOW_MS || nowSq > BigInt(high.sq)) {
     high = { sq: nowSq.toString(), ts: now };
   }
-  let low24 = await kvGet(env, 'price:low24h', null);
-  if (!low24 || now - low24.ts > LOW_WINDOW_MS || nowSq < BigInt(low24.sq)) {
-    low24 = { sq: nowSq.toString(), ts: now };
-  }
   // Rolling price buckets for NN multi-timeframe features (last 300 ticks ≈ 5h).
   let buckets = await kvGet(env, 'price:buckets', []);
   buckets.push({ ts: now, sq: nowSq.toString() });
   if (buckets.length > 300) buckets = buckets.slice(-300);
   await kvPut(env, 'price:buckets', buckets);
   const bucketsBig = buckets.map(b => ({ ts: b.ts, sq: BigInt(b.sq) }));
+  const low24 = rollLow24(await kvGet(env, 'price:low24h', null), nowSq, now, buckets);
   // Previous tick's move (for acceleration feature). Stored on price:tick.
   const prevMoveBps = prev && prev.prevMoveBps != null ? prev.prevMoveBps : 0;
   await kvPut(env, 'price:tick', { sq: nowSq.toString(), ts: now, prevMoveBps: moveBps });
@@ -2801,7 +2930,7 @@ async function runTick(env, log) {
   const dataQuality = dataQualityReads / dataQualityTotal;
   if (dataQuality < 1.0) log(`DATA QUALITY: ${dataQualityReads}/${dataQualityTotal} reads ok (${(dataQuality*100).toFixed(0)}%)`);
   const ctx = { env, publicClient, ethUsd, nowSq, prevSq, moveBps, prevMoveBps,
-    highSq, low24Sq, priceWeth, priceUsd, now, dryRun, log,
+    highSq, low24Sq, low24Ts: low24.ts, priceWeth, priceUsd, now, dryRun, log,
     buckets: bucketsBig, pattern, gasPriceWei,
     ethUsdPrev1h: ethUsdPrev && now - ethUsdPrev.ts < 2 * 3600e3 ? ethUsdPrev.price : null,
     // PLUS ULTRA senses shared to all wallets:
@@ -3017,3 +3146,8 @@ export default {
 // Named exports for the manual exit script (baby-exit-20261007, Anthony-ordered
 // full liquidation). Additive only — does not touch tick logic.
 export { executeSell, BURNERS, BRAWL };
+// Pure helpers exported for unit tests (test/*.test.mjs). No side effects.
+export const __test = {
+  closeReward, rollLow24, bottomSignal, buildFeatures, blankQTable, parseCombo, comboKey,
+  selectCombo, computePriceVelAnn, NN_IN, LOW_WINDOW_MS,
+};

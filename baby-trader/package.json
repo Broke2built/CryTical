@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/",
+    "test": "node --test test/*.test.mjs",
     "check": "node --check worker.js && for f in local-runner/*.mjs sim/*.mjs; do node --check $f || exit 1; done"
   },
   "dependencies": {
