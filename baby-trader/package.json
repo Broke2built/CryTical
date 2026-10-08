@@ -4,8 +4,10 @@
   "type": "module",
   "scripts": {
     "status": "node local-runner/doctor.mjs",
+    "ops": "node local-runner/ops.mjs",
     "start": "node local-runner/loop.mjs",
     "test": "node --test test/*.test.mjs",
+    "test:workerd": "node test/workerd/run.mjs",
     "tournament": "node sim/tournament.mjs --scenario mixed --generations 20",
     "fetch-real": "node sim/fetch-real.mjs",
     "train": "node sim/train.mjs --epochs 20 --gens 50",
@@ -14,5 +16,8 @@
   },
   "dependencies": {
     "viem": "2.37.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.148.0"
   }
 }

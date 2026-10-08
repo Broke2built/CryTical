@@ -1,7 +1,10 @@
 // doctor.mjs — ONE command that says whether the babies are OK, and what to do if not.
 //
-//   npm run status            # everything, including 1 batched RPC call for onchain checks
-//   npm run status -- --offline   # no network at all (heartbeat, log, KV file only)
+//   npm run status -- --remote    # Cloudflare mode: ONE https call to your worker, ZERO RPC
+//                                  # from this PC (needs WORKER_URL + TICK_TOKEN env vars)
+//   npm run status                # local-runner mode: reads local files + 1 batched RPC call
+//   npm run status -- --offline   # local-runner mode, no network at all
+//   add --json for machine-readable output (for scheduled agents)
 //
 // Exit code: 0 = all good, 1 = warnings, 2 = something needs fixing now.
 // Every problem prints a "FIX:" line with the exact thing to do. Safe to run any time,
@@ -21,17 +24,19 @@ const RESERVE_WEI = 50000000000000n; // worker.js GAS_RESERVE_WEI default
 // chain: { tokens: bigint[16], eth: bigint[16] } or null when offline / failed
 export function diagnose(x) {
   const out = [];
+  const cf = x.mode === 'cloudflare';
+  const RESTART = cf ? 'Run:  npm run ops -- ensure   (re-arms the Cloudflare alarm loop), then check again in 2 minutes. Still dead? npx wrangler tail' : 'Run:  pm2 restart babies   then run this again in 2 minutes. If it keeps happening: pm2 logs babies';
+  if (x.paused) out.push({ level: 'warn', what: 'Trading is PAUSED (kill switch is on).', fix: 'When you want it back on:  npm run ops -- resume' });
   const add = (level, what, fix) => out.push({ level, what, fix });
   const hb = x.heartbeat;
-  if (!hb) add('bad', 'The runner has never written a heartbeat — it is not running (or never started).',
-    'Start it:  KEYS_FILE=... KV_FILE=... DRY_RUN=true pm2 start local-runner/loop.mjs --name babies   (see RUN-IT.md)');
+  if (!hb) add('bad', 'No tick has ever finished — the bot is not running (or never started).',
+    cf ? 'Run:  npm run ops -- ensure   (starts the alarm loop). Deployed yet? See RUN-IT.md step 3.' : 'Start it:  KEYS_FILE=... KV_FILE=... DRY_RUN=true pm2 start local-runner/loop.mjs --name babies   (see RUN-IT.md)');
   else {
     const ageMin = (x.now - hb.ts) / 60000;
-    if (ageMin > 5) add('bad', `No tick finished in ${ageMin.toFixed(0)} minutes — the runner is stopped or stuck.`,
-      'Run:  pm2 restart babies   then run this again in 2 minutes. If it keeps happening: pm2 logs babies');
+    if (ageMin > 5 && !x.paused) add('bad', `No tick finished in ${ageMin.toFixed(0)} minutes — the bot is stopped or stuck.`, RESTART);
     else if (ageMin > 2.5) add('warn', `Last tick finished ${ageMin.toFixed(1)} min ago (normally < 2).`, 'Usually a slow network. Check again in a few minutes.');
     if (hb.consecutiveFails >= 3) add('bad', `The last ${hb.consecutiveFails} ticks failed (exit code ${hb.lastExit}).`,
-      'Look at the last lines of tick.log (pm2 logs babies). Most often: keys file path wrong, or KV file unreadable.');
+      cf ? 'Look at the log:  npm run ops -- log   Most often: a missing secret (npx wrangler secret list).' : 'Look at the last lines of tick.log (pm2 logs babies). Most often: keys file path wrong, or KV file unreadable.');
   }
   const tail = x.logLines.slice(-400).join('\n');
   const count = (re) => (tail.match(re) || []).length;
@@ -46,24 +51,29 @@ export function diagnose(x) {
   if (count(/TICK FATAL/) > 0) add('bad', 'A tick crashed with an unexpected error.', 'Send the last 50 lines of tick.log to Wren/Claude.');
   if (count(/WALLET TIMEOUT/) >= 5) add('warn', `${count(/WALLET TIMEOUT/)} wallet timeouts recently — the network is slow.`, 'Nothing to do unless it keeps going for hours; then add a keyed RPC (see above).');
   if (count(/CIRCUIT BREAKER TRIPPED/) > 0) add('info', 'The circuit breaker tripped (price moved >20% in a minute). Trading pauses 5 min by design.', 'Nothing to do.');
-  if (/DRY_RUN mode/.test(tail)) add('info', 'DRY_RUN is ON: the babies decide but never send transactions.', 'When you are ready to go live: restart without DRY_RUN=true.');
+  if (/DRY_RUN mode/.test(tail)) add('info', 'DRY_RUN is ON: the babies decide but never send transactions.',
+    cf ? 'When ready to go live: set DRY_RUN = "false" in wrangler.toml and  npx wrangler deploy' : 'When you are ready to go live: restart without DRY_RUN=true.');
   if (x.lockPid && !x.lockAlive) add('info', 'A stale lock file from a crashed tick exists.', 'Nothing to do — the next tick removes it automatically.');
 
   if (x.kv) {
     const pos = (i) => { try { const v = x.kv[`wallet:${i}:position`]; return v && v !== 'null' ? JSON.parse(v) : null; } catch { return null; } };
     let holding = 0;
+    const orphans = [], ghosts = [], noEth = [];
     for (let i = 0; i < 16; i++) {
       const p = pos(i);
       if (p) holding++;
       if (x.chain) {
         const onchain = x.chain.tokens[i], kvAmt = p ? BigInt(p.amountWei || '0') : 0n, DUST = 10n ** 18n;
-        if (onchain > DUST && kvAmt <= DUST) add('warn', `w${i}: holds coins onchain but the bot has no record (ORPHAN).`, 'Nothing to do — the next live tick adopts it automatically. If it is still here in 10 min, tell Wren.');
-        if (onchain <= DUST && kvAmt > DUST) add('warn', `w${i}: the bot thinks it holds coins, but the wallet is empty (GHOST).`, 'Nothing to do — the next live tick clears it. If it is still here in 10 min, tell Wren.');
-        if (x.chain.eth[i] <= RESERVE_WEI && !p) add('warn', `w${i}: out of ETH (at or below the gas reserve) — it cannot buy.`, `Send a little ETH on Base to wallet w${i} if you want it trading.`);
+        if (onchain > DUST && kvAmt <= DUST) orphans.push(`w${i}`);
+        if (onchain <= DUST && kvAmt > DUST) ghosts.push(`w${i}`);
+        if (x.chain.eth[i] <= RESERVE_WEI && !p) noEth.push(`w${i}`);
       }
     }
+    if (orphans.length) add('warn', `${orphans.join(', ')}: hold coins onchain but the bot has no record (ORPHAN).`, 'Nothing to do — the next live tick adopts them automatically. Still here in 10 min? Tell Wren.');
+    if (ghosts.length) add('warn', `${ghosts.join(', ')}: the bot thinks they hold coins, but the wallets are empty (GHOST).`, 'Nothing to do — the next live tick clears them. Still here in 10 min? Tell Wren.');
+    if (noEth.length) add('warn', `${noEth.length === 16 ? 'All 16 wallets' : noEth.join(', ')}: out of ETH (at or below the gas reserve) — cannot buy.`, 'Send a little ETH on Base to the wallets you want trading.');
     add('info', `${holding}/16 babies holding a position.`, null);
-  } else add('warn', 'KV state file not found.', 'Set KV_FILE to the same path the runner uses.');
+  } else add('warn', cf ? 'Could not read the bot state from the worker.' : 'KV state file not found.', cf ? 'Check WORKER_URL and TICK_TOKEN.' : 'Set KV_FILE to the same path the runner uses.');
   if (x.chainError) add('warn', `Onchain check skipped: ${x.chainError}`, 'Network issue; the rest of this report is still valid.');
   return out;
 }
@@ -95,7 +105,22 @@ async function chainCheck(rpcs, burners, coin) {
   return { tokens, eth };
 }
 
+async function remoteInput() {
+  const url = (process.env.WORKER_URL || '').replace(/\/$/, '');
+  if (!url || !process.env.TICK_TOKEN) { console.error('Set WORKER_URL (https://<your-worker>.workers.dev) and TICK_TOKEN first.'); process.exit(2); }
+  const r = await fetch(`${url}/health${process.argv.includes('--offline') ? '' : '?chain=1'}`, { headers: { 'x-tick-token': process.env.TICK_TOKEN }, signal: AbortSignal.timeout(30000) });
+  if (r.status === 403) { console.error('The worker refused the token (403). TICK_TOKEN here must match the worker secret.'); process.exit(2); }
+  const h = await r.json();
+  const chain = h.chain ? { tokens: h.chain.tokens.map((x) => BigInt(x)), eth: h.chain.eth.map((x) => BigInt(x)) } : null;
+  return { mode: 'cloudflare', now: Date.now(), heartbeat: h.heartbeat, logLines: h.logLines || [], kv: h.positions || {}, paused: h.paused,
+    lockPid: null, lockAlive: false, chain, chainError: h.chainError };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
+ const remote = process.argv.includes('--remote');
+ let input;
+ if (remote) input = await remoteInput();
+ else {
   const KV_FILE = resolve(process.env.KV_FILE || resolve(HERE, 'kv-store.json'));
   const LOG = resolve(process.env.TICK_LOG || resolve(HERE, 'tick.log'));
   const HB = resolve(process.env.HEARTBEAT_FILE || resolve(HERE, 'heartbeat.json'));
@@ -116,12 +141,19 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       chain = await chainCheck(rpcs, BURNERS, BRAWL);
     } catch (e) { chainError = String(e.message || e).slice(0, 100); }
   }
-  const findings = diagnose({ now: Date.now(), heartbeat, logLines, kv, lockPid, lockAlive, chain, chainError });
+  input = { mode: 'local', now: Date.now(), heartbeat, logLines, kv, lockPid, lockAlive, chain, chainError };
+ }
+  const { heartbeat } = input;
+  const findings = diagnose(input);
   const bad = findings.filter((f) => f.level === 'bad'), warn = findings.filter((f) => f.level === 'warn');
   const head = bad.length ? '❌ NEEDS FIXING NOW' : warn.length ? '⚠️  RUNNING, WITH WARNINGS' : '✅ ALL GOOD';
+  if (process.argv.includes('--json')) {
+    console.log(JSON.stringify({ status: bad.length ? 'bad' : warn.length ? 'warn' : 'ok', mode: input.mode, heartbeat, findings }, null, 1));
+    process.exit(bad.length ? 2 : warn.length ? 1 : 0);
+  }
   console.log(`\n${head}   (${new Date().toLocaleString()})`);
   if (heartbeat) console.log(`   last tick: ${Math.round((Date.now() - heartbeat.ts) / 1000)}s ago, ${heartbeat.ticks} ticks since start, last took ${(heartbeat.lastMs / 1000).toFixed(1)}s`);
-  if (existsSync(KV_FILE)) console.log(`   state file: ${KV_FILE} (${(statSync(KV_FILE).size / 1024).toFixed(0)} KB)`);
+  if (!remote) { const KV_FILE = resolve(process.env.KV_FILE || resolve(HERE, 'kv-store.json')); if (existsSync(KV_FILE)) console.log(`   state file: ${KV_FILE} (${(statSync(KV_FILE).size / 1024).toFixed(0)} KB)`); }
   let n = 0;
   for (const f of [...bad, ...warn, ...findings.filter((f) => f.level === 'info')]) {
     const icon = f.level === 'bad' ? '❌' : f.level === 'warn' ? '⚠️ ' : 'ℹ️ ';

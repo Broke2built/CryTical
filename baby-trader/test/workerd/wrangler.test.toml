@@ -1,0 +1,14 @@
+name = "baby-trader-test"
+main = "../../cloudflare.js"
+compatibility_date = "2025-09-01"
+[[durable_objects.bindings]]
+name = "TRADER"
+class_name = "TraderDO"
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TraderDO"]
+[vars]
+DRY_RUN = "true"
+TICK_INTERVAL_MS = "10000"
+TICK_TOKEN = "test-token"
+ZORA_API_KEY = "x"

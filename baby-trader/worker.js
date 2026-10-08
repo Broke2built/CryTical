@@ -119,38 +119,35 @@ import { closeReward } from './src/close.js';
 import { BRAWL, BURNERS, ERC20_ABI, FLEET_SW, LOW_WINDOW_MS, ORBX_WALLET, OWNER_EOA, SPIKE_MAX_EXITS_PER_TICK } from './src/config.js';
 import { ensureSellApproval, getQuote, resolveSellPermits, sendRawTx, waitReceipt } from './src/execution.js';
 import { buildFeatures } from './src/features.js';
-import { kvGet } from './src/kv.js';
 import { bottomSignal, computePriceVelAnn, isOwnerDrivenSpike, poolId, rollLow24 } from './src/market.js';
 import { NN_IN } from './src/nn.js';
 import { blankQTable, comboKey, parseCombo } from './src/qtable.js';
 import { executeSell } from './src/sell.js';
-import { acquireTickLock, runTick } from './src/tick.js';
+import { runLoggedTick } from './src/handlers.js';
+import { TraderDO, statusResponse } from './src/durable.js';
 
 // ------------------------------------------------------------------ handlers ---
+// TWO MODES (pick in wrangler.toml — see wrangler.toml.example and CLOUDFLARE-NOTES.md):
+//  * Durable Object mode (RECOMMENDED): a `TRADER` Durable Object binding exists. The DO
+//    runs every tick on its own alarm with strongly consistent storage; this cron only
+//    makes sure that alarm loop is alive, and every HTTP route is answered by the DO.
+//  * Legacy KV mode: no `TRADER` binding. The cron runs the tick here on Workers KV
+//    (stale-read + overlap risks — CLOUDFLARE-NOTES.md §2.1). Also what Node/tests use.
+const fleetStub = (env) => env.TRADER.get(env.TRADER.idFromName('fleet'));
+
 export default {
   async scheduled(event, env, ctx) {
-    const lines = [];
-    const log = (m) => {
-      const line = `[${new Date().toISOString()}] ${m}`;
-      lines.push(line);
-      console.log(line);
-    };
-    log('=== tick start ===');
-    if (!(await acquireTickLock(env, log))) return;
-    try {
-      await runTick(env, log);
-    } catch (e) {
-      log(`TICK FATAL: ${e && e.message}`);
+    if (env.TRADER) {
+      await fleetStub(env).fetch('https://fleet/ensure'); // watchdog: re-arm the alarm loop if lost
+      return;
     }
-    // Persist last tick's log for debugging (fetch /log).
-    try {
-      await env.TRADER_KV.put('meta:lastTickLog', lines.slice(-150).join('\n'));
-    } catch (e) { /* KV write failed — log already in console */ }
+    await runLoggedTick(env, 'tick');
   },
 
   // Read-only ops console (no secrets, no trading): GET /status, /log, /leaderboard.
-  // Manual tick trigger: POST /tick (same as cron; for testing or external schedulers).
+  // Manual tick trigger: POST /tick (token-gated when TICK_TOKEN is set).
   async fetch(request, env) {
+    if (env.TRADER) return fleetStub(env).fetch(request);
     const url = new URL(request.url);
     if (url.pathname === '/tick' && request.method === 'POST') {
       // (review) This endpoint runs a REAL trading tick for anyone who can reach the
@@ -159,51 +156,20 @@ export default {
       if (env.TICK_TOKEN && request.headers.get('x-tick-token') !== env.TICK_TOKEN) {
         return new Response('forbidden', { status: 403 });
       }
-      const lines = [];
-      const log = (m) => {
-        const line = `[${new Date().toISOString()}] ${m}`;
-        lines.push(line);
-        console.log(line);
-      };
-      log('=== manual tick start ===');
-      if (!(await acquireTickLock(env, log))) {
-        return new Response(lines.join('\n'), { headers: { 'Content-Type': 'text/plain' } });
-      }
-      try {
-        await runTick(env, log);
-      } catch (e) {
-        log(`TICK FATAL: ${e && e.message}`);
-      }
-      try {
-        await env.TRADER_KV.put('meta:lastTickLog', lines.slice(-150).join('\n'));
-      } catch (e) { /* KV write failed */ }
-      log('=== manual tick complete ===');
+      const lines = await runLoggedTick(env, 'manual tick');
       return new Response(lines.join('\n'), { headers: { 'Content-Type': 'text/plain' } });
     }
     if (url.pathname === '/log') {
       const t = (await env.TRADER_KV.get('meta:lastTickLog')) || '(no ticks yet)';
       return new Response(t, { headers: { 'Content-Type': 'text/plain' } });
     }
-    if (url.pathname === '/leaderboard' || url.pathname === '/status') {
-      const board = (await kvGet(env, 'leaderboard', []));
-      const wallets = [];
-      for (let i = 0; i < BURNERS.length; i++) {
-        const [pos, stats, seed] = await Promise.all([
-          kvGet(env, `wallet:${i}:position`, null),
-          kvGet(env, `wallet:${i}:stats`, null),
-          kvGet(env, `wallet:${i}:seed`, null),
-        ]);
-        wallets.push({
-          i, address: BURNERS[i], holding: !!pos,
-          position: pos ? { ...pos, amountWei: pos.amountWei } : null,
-          stats, seed,
-        });
-      }
-      return Response.json({ leaderboard: board, wallets, ts: new Date().toISOString() });
-    }
+    if (url.pathname === '/leaderboard' || url.pathname === '/status') return statusResponse(env);
     return new Response('brawl-trader: use /status or /log', { status: 404 });
   },
 };
+
+// The Durable Object class must be exported from the main module for wrangler.
+export { TraderDO };
 
 // Named exports for the manual exit script (baby-exit-20261007, Anthony-ordered
 // full liquidation). Additive only — does not touch tick logic.

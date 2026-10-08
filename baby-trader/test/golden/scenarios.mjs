@@ -30,13 +30,13 @@ function freezeClock() {
 
 const normLog = (s) => s.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<T>');
 
-export async function runScenarios() {
+export async function runScenarios({ makeKV = () => new MemKV() } = {}) {
   const clock = freezeClock();
   const chain = new FakeChain({ priceWeth: 1e-8 }).install();
   const origLog = console.log;
   const out = [];
   try {
-    const kv = new MemKV();
+    const kv = makeKV(); // MemKV, or a Durable-Object-storage-backed KV with the same helpers
     const env = { TRADER_KV: kv, DRY_RUN: 'false', RPC_URLS: 'http://fake-rpc', ZORA_API_KEY: 'x' };
     KEYS.forEach((k, i) => { env[`BURNER_KEY_${i}`] = k; });
     const tick = async (label, setup) => {
