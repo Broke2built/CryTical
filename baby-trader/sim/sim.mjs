@@ -19,9 +19,34 @@
 //    and recomputes only after a Q-update (identical argmax; tie re-roll per
 //    Q-update instead of per tick — negligible).
 
+// ============================== NOTES FOR WREN (review 2026-10-08) ==============================
+// Read before trusting sim-report.md. The "patient wins 3:1 / crash-dip is THE edge"
+// finding is built on these problems, now fixed or measured:
+//  1. REWARD: losses were divided by (1+holdHours), so slow losers looked good. Now
+//     uses worker.js closeReward (same fix as live).
+//  2. STOP-LOSS: only fired after 1.5-4.5h held; a -60% position in minute 3 rode on.
+//     Now the 40% hard stop applies at any time (same as live).
+//  3. NO GAS: live needs profit >= 1.5x gas; on ~$0.30 positions that is a ~10-15%
+//     move, not the 1-5% margin the sim used. SIM_GAS_USD (default $0.006/tx) now
+//     charges gas and the exit bar is max(1.5x round-trip gas, margin) — same as live.
+//  4. BOTTOM signal: same falling-knife fix as live (held low + bounce).
+//  5. OVERFITTING: 5000 episodes over ~725 price points replays the SAME few crash
+//     events thousands of times. The sim now prints how many UNIQUE entry ticks each
+//     signal used. If "crash" has 8 unique entries, the $0.26-0.34/trade edge is 8
+//     data points, not 235k trades. Trust unique counts, not trade counts.
+//  6. Paths were hard-coded to /home/hatch. Now SIM_DIR / SIM_KV env vars.
+// Fleet-vs-fleet dynamics (babies moving the price for each other) live in
+// sim/tournament.mjs — this file is a replay of real history.
+// ================================================================================================
 import { readFileSync, writeFileSync } from 'fs';
+import { dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { __test as W } from '../worker.js';
 
-const SIM_DIR = '/home/hatch/workspace/cloudflare/slippy-trader/sim';
+const SIM_DIR = process.env.SIM_DIR || dirname(fileURLToPath(import.meta.url));
+const SIM_KV = process.env.SIM_KV || '/home/hatch/workspace/cloudflare/slippy-trader/local-runner/kv-store.json';
+const GAS_USD = Number(process.env.SIM_GAS_USD ?? 0.006);
+const HARD_STOP_PCT = 40, BOTTOM_MIN_BOUNCE_PCT = 2, BOTTOM_MIN_LOW_AGE_MS = 30 * 60e3, SELL_PROFIT_MULT = 1.5;
 const FEE = 0.01;
 const SIM_BALANCE = 1.0;
 const BLIND_DT_MS = 10 * 60e3;
@@ -82,7 +107,7 @@ function exploitPick(qtable, keys, rng) {
 function recordCloseMath(profitUsd, costUsd, holdHours) {
   const roi = costUsd > 0 ? profitUsd / costUsd : 0;
   const hh = Math.max(holdHours, 1 / 3600);
-  return { roi, hh, baseReward: Math.round(roi * 10000 / (1 + hh)) };
+  return { roi, hh, baseReward: W.closeReward(roi, hh) }; // shared with live (no loss discount)
 }
 
 const ROLES = [
@@ -106,9 +131,10 @@ function precompute(coin) {
     let high = p;
     for (let k = j; k >= 0 && pts[k].t >= t - 3600e3; k--) if (pts[k].p > high) high = pts[k].p;
     const dPct = high > 0 ? (high - p) / high * 100 : 0;
-    let low = p;
-    for (let k = j; k >= 0 && pts[k].t >= t - 86400e3; k--) if (pts[k].p < low) low = pts[k].p;
+    let low = p, lowT = t;
+    for (let k = j; k >= 0 && pts[k].t >= t - 86400e3; k--) if (pts[k].p < low) { low = pts[k].p; lowT = pts[k].t; }
     const aboveLowPct = low > 0 ? (p - low) / low * 100 : Infinity;
+    const lowAgeMs = t - lowT;
     let tw = 0, twt = 0;
     for (let k = j; k >= 0 && pts[k].t >= t - 600e3; k--) {
       const kPrevT = k > 0 ? pts[k - 1].t : pts[k].t;
@@ -117,7 +143,7 @@ function precompute(coin) {
     }
     const twap = twt > 0 ? tw / twt : p;
     const m15 = j >= 15 && pts[j - 15].p > 0 ? (p - pts[j - 15].p) / pts[j - 15].p * 100 : 0;
-    F[j] = { tickDropPct, twoTickDropPct, dPct, aboveLowPct, belowTwap: p <= twap * 1.02, momentum15: m15,
+    F[j] = { tickDropPct, twoTickDropPct, dPct, aboveLowPct, lowAgeMs, belowTwap: p <= twap * 1.02, momentum15: m15,
              blind: prev ? (t - prev.t) > BLIND_DT_MS : false };
   }
   return { pts, F };
@@ -125,7 +151,7 @@ function precompute(coin) {
 const DATA = { BRAWL: precompute('BRAWL'), SLIPPY: precompute('SLIPPY') };
 
 // live Q-tables, READ-ONLY source
-const kv = JSON.parse(readFileSync('/home/hatch/workspace/cloudflare/slippy-trader/local-runner/kv-store.json', 'utf8'));
+const kv = JSON.parse(readFileSync(SIM_KV, 'utf8'));
 const liveQ = [];
 for (let i = 0; i < 16; i++) {
   const raw = kv[`wallet:${i}:qtable`];
@@ -177,18 +203,20 @@ function runEpisode(coin, s) {
       if (a.pos) {
         const effSellPx = price * (1 + impact); // what a market sell would actually get
         const grossSig = a.pos.tokens * effSellPx * (1 - FEE);
-        const profitSig = grossSig - a.pos.cost;
+        const profitSig = grossSig - a.pos.cost - 2 * GAS_USD; // buy gas + sell gas
         const roiPct = a.pos.cost > 0 ? profitSig / a.pos.cost * 100 : 0;
         const heldMs = t - a.pos.buyT;
         const pc = parseCombo(a.pos.comboKey);
+        const targetUsd = Math.max(SELL_PROFIT_MULT * 2 * GAS_USD, a.pos.cost * pc.margin / 100);
         let reason = null;
-        if (roiPct >= pc.margin) reason = 'target';
+        if (profitSig >= targetUsd) reason = 'target';
+        else if (roiPct <= -HARD_STOP_PCT) reason = 'hard-stop';
         else if (roiPct <= -a.slPct && heldMs >= a.slHoldMs) reason = 'stop-loss';
         if (!reason) continue;
         const grossEst = a.pos.tokens * mktNext * (1 + impact);
         const gross = grossEst * (1 - SLIP_K * grossEst) * (1 - FEE); // own-size slippage on the way out
-        const profit = gross - a.pos.cost;
-        a.balance += gross;
+        const profit = gross - a.pos.cost - 2 * GAS_USD;
+        a.balance += gross - GAS_USD;
         impact -= grossEst * IMPACT_K; // sells push price down for everyone after
         const { roi, hh, baseReward } = recordCloseMath(profit, a.pos.cost, (fpt - a.pos.buyT) / 3600e3);
         qUpdate(a, a.pos.comboKey, baseReward);
@@ -196,7 +224,7 @@ function runEpisode(coin, s) {
         if (profit > 0) a.wins++;
         const sig = a.pos.signal;
         const ss = a.signalStats[sig] || (a.signalStats[sig] = { trades: 0, pnl: 0, wins: 0 });
-        ss.trades++; ss.pnl += profit; if (profit > 0) ss.wins++;
+        ss.trades++; ss.pnl += profit; if (profit > 0) ss.wins++; (ss.uniq || (ss.uniq = {}))[a.pos.entryKey] = 1;
         a.entryIdxSum += a.pos.entryIdx;
         if (a.pos.firstBuyer) { a.firstBuys++; a.firstBuyPnl += profit; a.firstBuyTrades++; a.firstEntryIdxSum += a.pos.entryIdx; }
         a.pos = null; a.lastTradeT = fpt;
@@ -207,17 +235,19 @@ function runEpisode(coin, s) {
         if (a.balance < 0.05) continue;
         const crashBuy = f.tickDropPct >= pc.dump || f.twoTickDropPct >= pc.dump;
         const valueBuy = f.dPct >= pc.value && f.tickDropPct < STABLE_MAX_DROP_PCT && f.belowTwap;
-        const bottomBuy = f.aboveLowPct <= NEAR_LOW_PCT;
+        const bottomBuy = f.aboveLowPct >= BOTTOM_MIN_BOUNCE_PCT && f.aboveLowPct <= NEAR_LOW_PCT && f.lowAgeMs >= BOTTOM_MIN_LOW_AGE_MS;
         const momentumBuy = a.momentum && f.momentum15 >= MOMENTUM_TH && f.tickDropPct < STABLE_MAX_DROP_PCT;
         const rushBuy = a.rush && (j - s) < 15;
         const sig = crashBuy ? 'crash' : valueBuy ? 'value' : bottomBuy ? 'bottom' : momentumBuy ? 'momentum' : rushBuy ? 'rush' : null;
         if (!sig) continue;
-        const cost = a.balance * (pc.size / 100);
+        const cost = (a.balance - 2 * GAS_USD) * (pc.size / 100);
+        if (cost <= 10 * GAS_USD) continue; // can never clear gas
+        a.balance -= GAS_USD; // buy gas
         const buyPx = mktNext * (1 + impact) * (1 + SLIP_K * cost); // own-size slippage on the way in
         const tokens = cost * (1 - FEE) / buyPx;
         a.balance -= cost;
         impact += cost * IMPACT_K; // buys push price up for everyone after
-        a.pos = { comboKey: ck, cost, buyT: fpt, tokens, signal: sig, firstBuyer: !firstBuyDone, entryIdx: j - s };
+        a.pos = { comboKey: ck, cost, buyT: fpt, tokens, signal: sig, firstBuyer: !firstBuyDone, entryIdx: j - s, entryKey: `${coin}:${j}` };
         if (!firstBuyDone) firstBuyDone = true;
       }
     }
@@ -228,15 +258,15 @@ function runEpisode(coin, s) {
     if (!a.pos) continue;
     const grossEst = a.pos.tokens * lpx;
     const gross = grossEst * (1 - SLIP_K * grossEst) * (1 - FEE);
-    const profit = gross - a.pos.cost;
-    a.balance += gross;
+    const profit = gross - a.pos.cost - 2 * GAS_USD;
+    a.balance += gross - GAS_USD;
     const { roi, hh, baseReward } = recordCloseMath(profit, a.pos.cost, (lpt - a.pos.buyT) / 3600e3);
     qUpdate(a, a.pos.comboKey, baseReward);
     a.trades++; a.pnl += profit;
     if (profit > 0) a.wins++;
     const sig = a.pos.signal;
     const ss = a.signalStats[sig] || (a.signalStats[sig] = { trades: 0, pnl: 0, wins: 0 });
-    ss.trades++; ss.pnl += profit; if (profit > 0) ss.wins++;
+    ss.trades++; ss.pnl += profit; if (profit > 0) ss.wins++; (ss.uniq || (ss.uniq = {}))[a.pos.entryKey] = 1;
     a.entryIdxSum += a.pos.entryIdx;
     if (a.pos.firstBuyer) { a.firstBuys++; a.firstBuyPnl += profit; a.firstBuyTrades++; a.firstEntryIdxSum += a.pos.entryIdx; }
     a.pos = null; a.lastTradeT = lpt;
@@ -266,11 +296,13 @@ for (const a of agents) {
   ra.firstBuys += a.firstBuys; ra.firstBuyPnl += a.firstBuyPnl;
   ra.avgEntryIdx += a.entryIdxSum; ra.avgFirstEntryIdx += a.firstEntryIdxSum;
   for (const [sig, st] of Object.entries(a.signalStats)) {
-    const rs = ra.signalStats[sig] || (ra.signalStats[sig] = { trades: 0, pnl: 0, wins: 0 });
+    const rs = ra.signalStats[sig] || (ra.signalStats[sig] = { trades: 0, pnl: 0, wins: 0, uniqueEntries: 0, _u: {} });
     rs.trades += st.trades; rs.pnl += st.pnl; rs.wins += st.wins;
+    Object.assign(rs._u, st.uniq || {}); rs.uniqueEntries = Object.keys(rs._u).length;
   }
 }
 for (const ra of Object.values(roleAgg)) {
+  for (const rs of Object.values(ra.signalStats)) delete rs._u;
   ra.avgEntryIdx = ra.trades ? +(ra.avgEntryIdx / ra.trades).toFixed(1) : 0;
   ra.avgFirstEntryIdx = ra.firstBuys ? +(ra.avgFirstEntryIdx / ra.firstBuys).toFixed(1) : 0;
 }
@@ -280,5 +312,6 @@ console.error(`done ${EPISODES} episodes in ${((Date.now() - tStart) / 1000).toF
 for (const [name, ra] of Object.entries(roleAgg)) {
   const wr = ra.trades ? (ra.wins / ra.trades * 100).toFixed(1) : '-';
   const fbwr = ra.firstBuys ? (ra.firstBuyPnl / ra.firstBuys) : 0;
+  for (const [sig, st] of Object.entries(ra.signalStats)) console.error(`   ${sig}: ${st.trades} trades from ${st.uniqueEntries} UNIQUE entry ticks, $${(st.pnl / Math.max(1, st.trades)).toFixed(3)}/trade, win ${(st.wins / Math.max(1, st.trades) * 100).toFixed(0)}%`);
   console.error(`${name}: trades=${ra.trades} winRate=${wr}% pnl=$${ra.pnl.toFixed(2)} firstBuys=${ra.firstBuys} avgFirstBuyPnl=$${fbwr.toFixed(4)} avgEntryIdx=${ra.avgEntryIdx}`);
 }

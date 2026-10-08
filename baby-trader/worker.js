@@ -1,3 +1,47 @@
+/*
+ * ╔══════════════════════════════════════════════════════════════════════════════╗
+ * ║                         NOTES FOR WREN — READ FIRST                          ║
+ * ╚══════════════════════════════════════════════════════════════════════════════╝
+ * Review 2026-10-08. Every change is marked "(review)" inline. Full write-up with
+ * priorities and tips: WREN-GUIDE.md. Tests: `npm test` (no network, no money).
+ *
+ * MENTAL MODEL — what this file actually is:
+ *   cron tick -> read pool price -> update 1h-high / 24h-low / buckets -> per wallet:
+ *     HOLDING: quote a full exit -> target? NN early exit? hard stop? stop-loss? else hold
+ *     FLAT:    bandit picks a combo (dump,value,margin,size,cd) -> any buy signal? -> buy
+ *   on close: Q[combo] += ALPHA * (reward - Q[combo])   <- this is a BANDIT, not Q-learning.
+ *   There is no next-state, no discounting. "Q-table" = running average reward per arm.
+ *
+ * THE FIVE THINGS THAT WERE SILENTLY BREAKING LEARNING (all fixed here):
+ *   1. NN sizing rewrote the combo key -> closes credited to off-grid keys; the arm
+ *      that actually fired never learned. (executeBuy: creditKey)
+ *   2. Reward divided LOSSES by hold time -> holding losers was rewarded. (closeReward)
+ *   3. Cooldown ran before exits -> no stop-loss for 3-20 min after every buy.
+ *   4. The margin arm did nothing -> 1/3 of 432 arms were duplicates.
+ *   5. Orphan re-attribution mapped "no dip" to the 30%/70% cell -> the nonzero
+ *      Q-values in brains/ were FABRICATED. Treat every live Q-table as empty.
+ *
+ * UNITS — burn this in:  sq = sqrtPriceX96^2 = price * 2^192. LINEAR in price.
+ *   Ratios of sq ARE price ratios. Never sqrt() them, never 0.5*log() them.
+ *   (Several features did, so returns/vol/regret were half-size. Fixed.)
+ *
+ * MONEY MATH AT THIS BANKROLL — why the babies sit still:
+ *   ~$0.30 per wallet, ~$0.005-0.02 gas per swap on Base. Exit rule = profit >=
+ *   1.5x round-trip gas, so a position needs roughly +10-15% before it may sell.
+ *   The thresholds (30-60% crash, 70-90% dip) rarely fire, and a 30%+ ONE-tick
+ *   crash can never be bought: the 20% circuit breaker halts trading first.
+ *   More "senses" will not fix this; bankroll vs gas and threshold choice will.
+ *
+ * HARD LINE: these 16 wallets have one owner. They must never trade each other on a
+ *   public pool to create activity — that is wash trading whatever the reason.
+ *   Fleet-vs-fleet fights belong in sim/tournament.mjs or local-runner/fork-tournament.mjs.
+ *   On mainnet the babies trade the MARKET (external counterparties), not each other.
+ *   That is why the heartbeat and sibling-FOMO points are now 0.
+ *
+ * BEFORE YOU SHIP ANY CHANGE: `npm test`, then a fork run
+ *   (node local-runner/fork-tournament.mjs --ticks 60), then DRY_RUN=true on live.
+ * ════════════════════════════════════════════════════════════════════════════════
+ */
 /**
  * brawl-trader — 24/7 autonomous BRAWL v2 market-making bot (Cloudflare Workers cron).
  *
@@ -112,7 +156,9 @@ const QUOTE_URL = 'https://api-sdk.zora.engineering/quote';
 const SLIPPAGE = 0.25; // 25% — BRAWL v2 pool is extremely thin; $0.01 buys revert at 5%
 
 // 16 burner EOAs (addresses are public; PRIVATE KEYS live in Workers secrets).
-const BURNERS = [
+// `let` so the fork tournament (local-runner/fork-tournament.mjs) can swap in throwaway
+// test wallets via env.BURNER_ADDRESSES. On live, leave BURNER_ADDRESSES unset.
+let BURNERS = [
   '0x35CdcDe2f918F777edeB72B8dA4928Ce657fdADF',
   '0x191C4bC7D5e70a64ba30A9903C1De4dA75589F23',
   '0xB2f12BC661CE239Ba7607bf7C6b995A8379057E3',
@@ -132,9 +178,9 @@ const BURNERS = [
 ];
 
 // RL bandit config
-const DUMP_GRID = [30, 40, 50, 60];   // crash-buy: sudden-dump entry threshold % (learnable)
+let DUMP_GRID = [30, 40, 50, 60];   // crash-buy: sudden-dump entry threshold % (learnable)
                                       // (Anthony 2026-10-07 14:26: thresholds must be learned, not fixed)
-const VALUE_GRID = [70, 80, 90];      // value-buy: >=X% below 1h high = cheap (learnable)
+let VALUE_GRID = [70, 80, 90];      // value-buy: >=X% below 1h high = cheap (learnable)
 const MARGIN_GRID = [1, 3, 5];    // profit margin %
 const SIZE_GRID = [60, 70, 80];   // % of post-reserve balance spent per buy — LEARNABLE
                                   // (Anthony 2026-10-07 14:11: fixed $ is wrong; sizing scales with portfolio)
@@ -396,13 +442,11 @@ async function reconstructBuyCombo(env, publicClient, position, seed, log) {
     const out = [];
     for (const b of blocks) {
       // Single attempt per block, 15s timeout each. ANY failure -> throw (caller falls back).
-      const [sqrtPriceX96] = await Promise.race([
+      const [sqrtPriceX96] = await raceTimeout(
         client.readContract({
           address: STATEVIEW, abi: STATEVIEW_ABI, functionName: 'getSlot0',
           args: [pid], blockNumber: BigInt(Math.max(b, 0)),
-        }),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('slot0 archive read timeout (15s)')), 15000)),
-      ]);
+        }), 15000, 'slot0 archive read timeout (15s)');
       out.push(BigInt(sqrtPriceX96) * BigInt(sqrtPriceX96));
     }
     return out;
@@ -496,6 +540,18 @@ async function reconstructBuyCombo(env, publicClient, position, seed, log) {
   }
   log(`reconstructBuyCombo: orphan re-attributed -> ${key} (proxies: 2min drop ~${dropPct2.toFixed(1)}%, dip-from-${dipRefLabel} ~${dPct.toFixed(1)}%, ${aboveLowNote}; seed margin/size/cd)`);
   return key;
+}
+
+// ------------------------------------------------------------------ timeouts (review) ---
+// WREN: `Promise.race([work, new Promise(... setTimeout(reject, ms))])` leaves the timer
+// running after `work` wins. On Cloudflare that is harmless; in the LOCAL runner (Node)
+// every live timer keeps the process alive. The 120s batch timers kept each
+// run-tick.mjs process alive ~2 minutes after the tick finished, holding the flock —
+// so the "1-minute" fleet actually ticked every 2-3 minutes. Always clear the timer.
+function raceTimeout(promise, ms, message) {
+  let timer;
+  const t = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  return Promise.race([promise, t]).finally(() => clearTimeout(timer));
 }
 
 // ------------------------------------------------------------------ KV helpers ---
@@ -919,10 +975,9 @@ async function waitReceipt(publicClient, hash, log, timeoutMs = 90000) {
     try {
       // Per-call timeout: a hung RPC must not wedge the tick (2026-10-07 16:45:
       // w8 stuck 16 min on a non-returning receipt call, flock blocked all ticks).
-      const rc = await Promise.race([
+      const rc = await raceTimeout(
         publicClient.request({ method: 'eth_getTransactionReceipt', params: [hash] }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('receipt call timeout')), 15000)),
-      ]);
+        15000, 'receipt call timeout');
       if (rc && rc.blockNumber) return rc;
       errStreak = 0;
     } catch (e) {
@@ -988,6 +1043,16 @@ async function ensureSellApproval(publicClient, account, target, amountWei, env,
 // Adaptive exploration (2026-10-07 23:05 EDT, superintelligence #8): epsilon
 // scales with the fleet's recent learning velocity. Flatline (avg reward < 10)
 // -> explore more (break deadlocks). Learning well (avg > 100) -> exploit more.
+// WREN — two known weaknesses of this bandit (not changed here, on purpose; test any
+// change in sim/tournament.mjs first):
+//  (a) SAMPLE SIZE. 432 arms per wallet, ~3 closes per wallet per day. Each arm needs
+//      maybe 5-10 samples before its average means anything -> years. Options: a
+//      FACTORED bandit (learn dump, value, margin, size, cd as 5 small independent
+//      tables: 4+3+3+3+4 = 17 arms), or Thompson sampling instead of epsilon-greedy.
+//  (b) RE-ROLL BIAS. While flat, a new combo is drawn EVERY tick and the buy fires if
+//      THAT combo's gate passes. Exploration therefore over-credits loose-threshold
+//      combos (they pass more often). Fix: draw once after each close and keep it until
+//      it trades or N ticks pass.
 function selectCombo(qtable, rngState, log, epsilon = EPSILON) {
   // Defense-in-depth (2026-10-08): keys whose parseCombo yields non-finite fields
   // (e.g. 'baseline_unattributed', and any raw 'orphan_*' key that somehow lands in
@@ -1607,16 +1672,26 @@ async function executeBuy(ctx, i, combo, dipPct, log) {
   await kvPutCritical(env, `wallet:${i}:pendingBuy`, { comboKey: creditKey, sizePct: combo.size, ts: Date.now() }, log);
 
   const account = privateKeyToAccount(env[`BURNER_KEY_${i}`]);
-  const { hash, gasPrice } = await sendRawTx(publicClient, account, {
-    to: target, data: q.call.data, value: BigInt(q.call.value || '0'),
-  }, log, { signal: ctx.signal });
+  let hash, gasPrice;
+  try {
+    ({ hash, gasPrice } = await sendRawTx(publicClient, account, {
+      to: target, data: q.call.data, value: BigInt(q.call.value || '0'),
+    }, log, { signal: ctx.signal }));
+  } catch (e) {
+    // Nothing was broadcast — a stale write-ahead record would mislabel a later orphan.
+    await kvPut(env, `wallet:${i}:pendingBuy`, null).catch(() => {});
+    throw e;
+  }
   let rc = null;
   try {
     rc = await waitReceipt(publicClient, hash, log);
     if (rc && rc.status !== '0x1') throw new Error(`buy reverted: ${hash}`);
     if (!rc) throw new Error('receipt unavailable — balance-delta fallback');
   } catch (e) {
-    if (String(e.message || '').startsWith('buy reverted')) throw e;
+    if (String(e.message || '').startsWith('buy reverted')) {
+      await kvPut(env, `wallet:${i}:pendingBuy`, null).catch(() => {}); // reverted = no tokens = no orphan
+      throw e;
+    }
     log(`buy waitReceipt failed (${String(e.message).slice(0, 80)}) — balance-delta fallback`);
     // Retry: the buy often lands 10-40s after the receipt poll gives up.
     let balCheck = 0n;
@@ -2737,6 +2812,12 @@ async function runTick(env, log) {
   const now = Date.now();
   const dryRun = env.DRY_RUN === 'true';
   const RPC_URLS = (env.RPC_URLS || env.RPC_URL || 'https://mainnet.base.org').split(',').map(s => s.trim()).filter(Boolean);
+  if (env.BURNER_ADDRESSES) BURNERS = env.BURNER_ADDRESSES.split(',').map((a) => a.trim());
+  // Threshold-grid override (fork tournament / experiments ONLY). Changing the grid on
+  // live state wipes every Q-table via the QGRID_VER check below — never set these on
+  // the live fleet without meaning to. e.g. DUMP_GRID="5,10,15,20" VALUE_GRID="10,20,30"
+  if (env.DUMP_GRID) DUMP_GRID = env.DUMP_GRID.split(',').map(Number);
+  if (env.VALUE_GRID) VALUE_GRID = env.VALUE_GRID.split(',').map(Number);
   if (dryRun) log('*** DRY_RUN mode — no broadcasts ***');
 
   // Try each RPC in order; use the first that serves the price read.
@@ -2754,10 +2835,7 @@ async function runTick(env, log) {
     }
     try {
       const pc = createPublicClient({ chain: base, transport: http(rpcUrl, { timeout: 15000 }) });
-      const sq = await Promise.race([
-        fetchPoolSq(pc),
-        new Promise((_, reject) => setTimeout(() => reject(new Error(`fetchPoolSq timeout on ${rpcUrl}`)), 20000)),
-      ]);
+      const sq = await raceTimeout(fetchPoolSq(pc), 20000, `fetchPoolSq timeout on ${rpcUrl}`);
       publicClient = pc; nowSq = sq; rpcUsed = rpcUrl;
       break;
     } catch (e) { lastErr = e; }
@@ -2955,6 +3033,11 @@ async function runTick(env, log) {
   // 3b) Spike listener (Anthony 2026-10-07 13:41 EDT): +10% in ONE tick (likely Anthony
   // or a big buyer) -> immediate exit pass. Every holding wallet attempts its spike sell
   // in THIS invocation, before normal per-wallet logic. Cooldowns don't block profit.
+  // WREN: this pass tries to sell EVERY holding wallet in the same tick (each one only
+  // needs the 1.5x-gas bar, not its own margin target) — the same synchronized
+  // multi-wallet exit you banned for stop-losses. And if the spike really is Anthony
+  // buying, the fleet is selling straight into its own owner: same beneficial owner on
+  // both sides. Prefer: only wallets whose OWN target is met, staggered across ticks.
   if (prev && moveBps >= SPIKE_PCT * 100) {
     log(`!!! SPIKE +${(moveBps / 100).toFixed(1)}% since last tick — immediate exit pass on all wallets`);
     for (let i = 0; i < BURNERS.length; i++) {
@@ -3005,10 +3088,7 @@ async function runTick(env, log) {
   const WALLET_CONCURRENCY = 4;
   const WALLET_TIMEOUT_MS = 45000;
   const BATCH_TIMEOUT_MS = 120000;
-  const withTimeout = (promise, ms, label) => Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout after ${ms}ms`)), ms)),
-  ]);
+  const withTimeout = (promise, ms, label) => raceTimeout(promise, ms, `${label} timeout after ${ms}ms`);
   for (let batch = 0; batch < BURNERS.length; batch += WALLET_CONCURRENCY) {
     const ids = [];
     for (let k = 0; k < WALLET_CONCURRENCY && batch + k < BURNERS.length; k++) ids.push(batch + k);
@@ -3147,6 +3227,8 @@ export default {
 // full liquidation). Additive only — does not touch tick logic.
 export { executeSell, BURNERS, BRAWL };
 // Pure helpers exported for unit tests (test/*.test.mjs). No side effects.
+// Internals for the fork tournament's simulated outsiders (same execution path as babies).
+export const __internal = { getQuote, resolveSellPermits, sendRawTx, waitReceipt, ensureSellApproval, ERC20_ABI };
 export const __test = {
   closeReward, rollLow24, bottomSignal, buildFeatures, blankQTable, parseCombo, comboKey,
   selectCombo, computePriceVelAnn, NN_IN, LOW_WINDOW_MS,

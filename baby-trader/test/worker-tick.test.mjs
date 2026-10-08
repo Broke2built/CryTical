@@ -61,13 +61,13 @@ test('cooldown no longer blocks exits on a holding wallet', async () => {
   try {
     const kv = new MemKV();
     const now = Date.now();
-    chain.tokens.set(W0.toLowerCase(), 10n ** 24n);
+    chain.tokens.set(W0.toLowerCase(), 10n ** 22n); // 1e4 tokens * 1e-8 ETH * $3000 = $0.30 = cost basis
     chain.eth.set(W0.toLowerCase(), 10n ** 14n);
     kv.set('wallet:0:seed', { dip: 40, margin: 3, size: 70, cooldownMin: 10 });
     kv.set('wallet:0:qgridver', 10);
     kv.set('wallet:0:qtable', __test.blankQTable());
     kv.set('wallet:0:lastTrade', now - 60e3); // bought 1 min ago: every cd arm is still cooling
-    kv.set('wallet:0:position', { buyCostUsd: 0.3, buyGasUsd: 0.0001, amountWei: (10n ** 24n).toString(),
+    kv.set('wallet:0:position', { buyCostUsd: 0.3, buyGasUsd: 0.0001, amountWei: (10n ** 22n).toString(),
       comboKey: '30_70_3_70_cd20', marginAtOpen: 3, sizeAtOpen: 70, buyTx: '0x', buyTs: now - 60e3 });
     kv.set('price:tick', { sq: sqFor(price).toString(), ts: now - 60e3, prevMoveBps: 0 });
     chain.sellQuoteMult = 0.5; // -50%: must trip the no-time-gate hard stop
